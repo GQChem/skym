@@ -35,8 +35,13 @@ export interface Viewer {
   close: () => void;
 }
 
-export async function startViewer(store: GraphStore, preferredPort: number): Promise<Viewer> {
+export async function startViewer(
+  store: GraphStore,
+  preferredPort: number,
+  projectDir: string,
+): Promise<Viewer> {
   const clients = new Map<http.ServerResponse, Theme>();
+  let port = preferredPort;
 
   const server = http.createServer((req, res) => {
     const url = new URL(req.url ?? "/", "http://127.0.0.1");
@@ -82,6 +87,21 @@ export async function startViewer(store: GraphStore, preferredPort: number): Pro
       return;
     }
 
+    // Lets a tab say which project it belongs to when several are open.
+    if (pathname === "/whoami") {
+      res.writeHead(200, { "Content-Type": "application/json; charset=utf-8" });
+      res.end(
+        JSON.stringify({
+          project: path.basename(projectDir),
+          projectDir,
+          root: store.root,
+          chartId: store.chartId,
+          port,
+        }),
+      );
+      return;
+    }
+
     if (pathname.startsWith("/assets/")) {
       const name = path.basename(pathname);
       const chart = url.searchParams.get("chart");
@@ -116,7 +136,7 @@ export async function startViewer(store: GraphStore, preferredPort: number): Pro
     fs.createReadStream(file).pipe(res);
   });
 
-  const port = await new Promise<number>((resolve, reject) => {
+  port = await new Promise<number>((resolve, reject) => {
     const attempt = (p: number, remaining: number) => {
       server.once("error", (err: NodeJS.ErrnoException) => {
         if (err.code === "EADDRINUSE" && remaining > 0) {

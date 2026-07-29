@@ -11,11 +11,16 @@
     <header class="bar">
       <div class="title">
         <span class="dot" id="live-dot" title="disconnected"></span>
+        <span class="proj" id="proj-name" hidden></span>
         <h1 id="project">skym</h1>
         <select id="charts" title="Switch between chats' charts"></select>
         <span class="rev" id="rev"></span>
       </div>
       <div class="actions">
+        <label class="width-ctl" title="Node width">
+          <span aria-hidden="true">↔</span>
+          <input id="node-width" type="range" min="180" max="620" step="10" />
+        </label>
         <button id="fit" title="Fit to screen">Fit</button>
         <button id="inline-figs" title="Show figures inline on the chart">Figures</button>
         <button id="theme" title="Toggle light/dark">Theme</button>

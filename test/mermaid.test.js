@@ -118,7 +118,8 @@ test("exploring and waiting carry animated marks", () => {
   assert.ok(src.includes("class='skym-hourglass'"), "waiting needs an hourglass span");
   // Static states must not be wrapped, or they would animate too.
   const doneLine = src.split("\n").find((l) => l.startsWith("  n_c("));
-  assert.ok(!doneLine.includes("skym-"), "done should carry no animation span");
+  assert.ok(!doneLine.includes("skym-gear"), "done must not spin");
+  assert.ok(!doneLine.includes("skym-hourglass"), "done must not tip");
 });
 
 test("every state has a classDef in both themes", () => {

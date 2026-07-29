@@ -48,7 +48,7 @@ function openBrowser(url: string): void {
 }
 
 async function ensureViewer(): Promise<Viewer> {
-  if (!viewer) viewer = await startViewer(store, preferredPort);
+  if (!viewer) viewer = await startViewer(store, preferredPort, projectDir);
   openBrowser(`${viewer.url}?chart=${store.chartId}`);
   return viewer;
 }

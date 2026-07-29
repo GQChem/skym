@@ -55,6 +55,20 @@ body {
   min-width: 0;
 }
 
+.proj {
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--muted);
+  border: 1px solid var(--border);
+  border-radius: 5px;
+  padding: 2px 7px;
+  white-space: nowrap;
+  align-self: center;
+  cursor: help;
+}
+
 .title h1 {
   font-size: 15px;
   font-weight: 650;
@@ -111,9 +125,40 @@ button.active:hover { color: #fff; filter: brightness(1.1); }
   filter: drop-shadow(0 2px 6px rgba(0, 0, 0, 0.18));
 }
 
-/* The slot only takes up space while inline figures are on. */
-.skym-fig-slot { height: 0 !important; }
-body.inline-figs .skym-fig-slot { height: 138px !important; }
+/* Node width is driven here so the slider re-lays-out without a rebuild. */
+:root { --node-width: 250px; }
+
+/* Not scoped to #canvas: mermaid measures labels in a detached container. */
+.skym-width-spacer {
+  display: inline-block;
+  height: 0;
+  width: var(--node-width);
+}
+
+.width-ctl {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  color: var(--muted);
+  font-size: 13px;
+  padding-right: 4px;
+}
+
+.width-ctl input[type="range"] {
+  width: 92px;
+  accent-color: var(--accent);
+  cursor: ew-resize;
+}
+
+/* The slot only takes up space while inline figures are on. Scaled with the
+   node width so the figure keeps a sensible aspect ratio. */
+.skym-fig-slot {
+  display: inline-block;
+  width: calc(var(--node-width) - 20px);
+  height: 0;
+}
+
+body.inline-figs .skym-fig-slot { height: calc((var(--node-width) - 20px) * 0.6); }
 body.inline-figs .skym-fig-count { display: none; }
 
 main {

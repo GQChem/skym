@@ -17,6 +17,10 @@
   let inlineFigs = localStorage.getItem("skym-inline-figs") === "1";
   // Set before the first render, or the slot measures zero and figures vanish.
   document.body.classList.toggle("inline-figs", inlineFigs);
+  document.documentElement.style.setProperty(
+    "--node-width",
+    `${Number(localStorage.getItem("skym-node-width")) || 250}px`,
+  );
   let view = { x: 0, y: 0, k: 1 };
   let userMovedView = false;
   let renderToken = 0;
@@ -297,13 +301,19 @@
       if (!node.figures?.length) continue;
       const el = [...canvas.querySelectorAll(".node")].find((e) => idMatches(e.id, node.id));
       if (!el) continue;
-      // Draw into the reserved slot, positioned via screen rects so the node's
-      // own transform and the canvas zoom are both accounted for.
+      // Prefer the reserved slot. An older server build emits no slot markup,
+      // so fall back to the lower part of the node rather than showing nothing.
       const slot = el.querySelector(".skym-fig-slot");
-      if (!slot) continue;
-      const sr = slot.getBoundingClientRect();
       const svgRect = svg.getBoundingClientRect();
-      if (!sr.width || !sr.height) continue;
+      let sr = slot?.getBoundingClientRect();
+      if (!sr || !sr.width || !sr.height) {
+        const nb = el.getBoundingClientRect();
+        if (!nb.width || !nb.height) continue;
+        const w = Math.min(nb.width - 28, 240);
+        const h = Math.min(w * 0.6, nb.height - 16);
+        if (h < 24) continue;
+        sr = { left: nb.left + (nb.width - w) / 2, top: nb.bottom - h - 10, width: w, height: h };
+      }
       const vb = svg.viewBox.baseVal;
       const sx = (vb?.width || svgRect.width) / svgRect.width;
       const sy = (vb?.height || svgRect.height) / svgRect.height;
@@ -373,6 +383,27 @@
   document.getElementById("fit").addEventListener("click", () => {
     userMovedView = false;
     fit();
+  });
+
+  const widthEl = document.getElementById("node-width");
+  let nodeWidth = Number(localStorage.getItem("skym-node-width")) || 250;
+  let widthTimer = null;
+
+  const applyWidth = () => {
+    document.documentElement.style.setProperty("--node-width", `${nodeWidth}px`);
+    widthEl.value = String(nodeWidth);
+    widthEl.title = `Node width: ${nodeWidth}px`;
+  };
+
+  widthEl.addEventListener("input", () => {
+    nodeWidth = Number(widthEl.value);
+    applyWidth();
+    // Mermaid measures labels at render time, so re-render to re-lay-out.
+    clearTimeout(widthTimer);
+    widthTimer = setTimeout(() => {
+      localStorage.setItem("skym-node-width", String(nodeWidth));
+      if (state) render(state);
+    }, 140);
   });
 
   const inlineBtn = document.getElementById("inline-figs");
@@ -502,9 +533,23 @@
     document.getElementById("live-dot").title = chartParam ? "read-only snapshot" : "live";
   });
 
+  // With several projects open, each on its own port, name the project so a
+  // tab is identifiable and the title bar is not just "skym".
+  fetch("/whoami")
+    .then((r) => r.json())
+    .then((w) => {
+      const el = document.getElementById("proj-name");
+      el.textContent = w.project;
+      el.title = `${w.projectDir}\nport ${w.port}`;
+      el.hidden = false;
+      document.title = `${w.project} · skym`;
+    })
+    .catch(() => {});
+
   const saved = localStorage.getItem("skym-theme");
   if (saved) document.documentElement.setAttribute("data-theme", saved);
   initMermaid();
+  applyWidth();
   syncInlineBtn();
   renderLegend();
   refreshCharts();

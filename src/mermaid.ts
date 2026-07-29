@@ -53,12 +53,13 @@ function nodeLabel(n: FlowNode): string {
   // when inline mode is on; the emoji line is the fallback when it is off.
   const figs = n.figures.length
     ? [
-        `<span class='skym-fig-slot' style='display:inline-block;width:230px;height:138px'></span>`,
+        `<span class='skym-fig-slot'></span>`,
         `<span class='skym-fig-count'>🖼 ${n.figures.length} figure${n.figures.length > 1 ? "s" : ""}</span>`,
       ]
     : [];
-  // A zero-ink spacer line sets a minimum measured width for short nodes.
-  const spacer = "<span style='display:inline-block;width:250px'></span>";
+  // A zero-ink spacer sets the measured width; the viewer overrides its width
+  // via CSS so the node-width slider works without re-rendering server-side.
+  const spacer = "<span class='skym-width-spacer'></span>";
   return [head, ...bullets, ...more, ...figs, spacer].join("<br/>");
 }
 
