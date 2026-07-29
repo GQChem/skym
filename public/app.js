@@ -15,6 +15,8 @@
   let chartParam = new URLSearchParams(location.search).get("chart");
   let ownChartId = null;
   let inlineFigs = localStorage.getItem("skym-inline-figs") === "1";
+  // Set before the first render, or the slot measures zero and figures vanish.
+  document.body.classList.toggle("inline-figs", inlineFigs);
   let view = { x: 0, y: 0, k: 1 };
   let userMovedView = false;
   let renderToken = 0;
@@ -125,6 +127,7 @@
   // The viewer has no channel back to Claude, so the button copies a prompt.
   const workOnBtn = document.getElementById("workon");
   let workOnNode = null;
+  let workOnRect = null;
   let hideTimer = null;
 
   const promptFor = (n) => {
@@ -134,28 +137,49 @@
     return lines.join("\n");
   };
 
+  // Anchored just inside the node's top-right corner: overlapping the node
+  // means there is no gap to cross, so moving to the button never leaves it.
   const showWorkOn = (el, node) => {
     clearTimeout(hideTimer);
     workOnNode = node;
-    const r = el.getBoundingClientRect();
+    workOnRect = el.getBoundingClientRect();
     workOnBtn.hidden = false;
     workOnBtn.classList.remove("copied");
     workOnBtn.textContent = "⚙ Work on this";
-    workOnBtn.style.left = `${Math.max(8, r.left + r.width / 2 - 60)}px`;
-    workOnBtn.style.top = `${Math.max(8, r.top - 34)}px`;
+    workOnBtn.style.visibility = "hidden";
+    // Measure after the text is set so the width is real.
+    requestAnimationFrame(() => {
+      const bw = workOnBtn.offsetWidth || 118;
+      workOnBtn.style.left = `${Math.max(6, workOnRect.right - bw - 8)}px`;
+      workOnBtn.style.top = `${Math.max(6, workOnRect.top + 8)}px`;
+      workOnBtn.style.visibility = "visible";
+    });
   };
 
   const scheduleHide = () => {
+    clearTimeout(hideTimer);
     hideTimer = setTimeout(() => {
       workOnBtn.hidden = true;
       workOnNode = null;
-    }, 400);
+      workOnRect = null;
+    }, 500);
   };
 
+  // Hide only when the pointer is outside BOTH the node and the button,
+  // rather than on any single mouseleave.
+  const pointerInside = (x, y, rect, pad = 0) =>
+    rect && x >= rect.left - pad && x <= rect.right + pad && y >= rect.top - pad && y <= rect.bottom + pad;
+
+  stage.addEventListener("mousemove", (e) => {
+    if (workOnBtn.hidden) return;
+    const overNode = pointerInside(e.clientX, e.clientY, workOnRect, 4);
+    const overBtn = pointerInside(e.clientX, e.clientY, workOnBtn.getBoundingClientRect(), 6);
+    if (overNode || overBtn) clearTimeout(hideTimer);
+    else scheduleHide();
+  });
+
   stage.addEventListener("mouseleave", scheduleHide);
-  canvas.addEventListener("mouseleave", scheduleHide);
   workOnBtn.addEventListener("mouseenter", () => clearTimeout(hideTimer));
-  workOnBtn.addEventListener("mouseleave", scheduleHide);
 
   workOnBtn.addEventListener("click", async (ev) => {
     ev.stopPropagation();
@@ -251,7 +275,8 @@
       }
     });
 
-    renderInlineFigures();
+    // Slot heights come from CSS, so wait for layout before measuring them.
+    requestAnimationFrame(renderInlineFigures);
     if (!userMovedView) fit();
     else applyView();
     highlight();
