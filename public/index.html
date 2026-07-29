@@ -1,0 +1,60 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>skym · project flow</title>
+    <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'><text y='13' font-size='13'>🗺️</text></svg>" />
+    <link rel="stylesheet" href="/app.css" />
+  </head>
+  <body>
+    <header class="bar">
+      <div class="title">
+        <span class="dot" id="live-dot" title="disconnected"></span>
+        <h1 id="project">skym</h1>
+        <select id="charts" title="Switch between chats' charts"></select>
+        <span class="rev" id="rev"></span>
+      </div>
+      <div class="actions">
+        <button id="fit" title="Fit to screen">Fit</button>
+        <button id="theme" title="Toggle light/dark">Theme</button>
+        <button id="export" title="Download SVG">SVG</button>
+        <button id="panel-toggle" title="Toggle details panel">Details</button>
+      </div>
+    </header>
+
+    <main>
+      <div id="stage">
+        <div id="canvas"></div>
+        <div id="empty" class="empty">
+          <p>No flowchart yet.</p>
+          <p class="hint">Ask Claude to run <code>flow_init</code> to start one.</p>
+        </div>
+      </div>
+
+      <aside id="panel">
+        <section>
+          <h2>Selected</h2>
+          <div id="detail" class="muted">Click a node in the chart.</div>
+        </section>
+        <section>
+          <h2>Legend</h2>
+          <div id="legend" class="legend"></div>
+        </section>
+        <section>
+          <h2>Activity</h2>
+          <ol id="events" class="events"></ol>
+        </section>
+      </aside>
+    </main>
+
+    <button id="workon" class="workon" hidden>⚙ Work on this</button>
+
+    <div id="lightbox" class="lightbox" hidden>
+      <img id="lightbox-img" alt="" />
+    </div>
+
+    <script src="/vendor/mermaid.min.js"></script>
+    <script src="/app.js"></script>
+  </body>
+</html>

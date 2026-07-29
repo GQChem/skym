@@ -1,0 +1,31 @@
+# Exploration chart
+
+This project uses the `skym-flow` MCP server to keep a live visual chart of what is going on. It is not a decorative diagram — it is the working record of what was tried, what was ruled out, and what the results were.
+
+Call `flow_init` once at the start of a chat, titled with what this chat is about ("Fixing the auth redirect loop"). Each chat gets its own chart, saved under `.flows/charts/<slug>/`.
+
+Reusing the same title resumes that chart, so if a chat is restarted, call `flow_init` with the title you used before and continue the existing tree — check the current states before adding nodes, and reuse existing ids to update them rather than duplicating. Pass `fresh: true` only when you deliberately want to start over.
+
+## The three node kinds
+
+- **`flow_action`** — something done or to be done. States: `planned` → `exploring` → `done`, or `abandoned` / `blocked`.
+- **`flow_result`** — what an action actually produced. States: `good`, `bad`, `mixed`, `inconclusive`.
+- **`flow_options`** — a fork. Record the candidates *before* exploring them, so the alternatives stay visible.
+
+## How to use them
+
+- When you see a choice, call `flow_options` with every candidate you considered — including the ones you will not pursue. Unexplored branches are the point; they start as `planned`.
+- Set a node to `exploring` when you start it and `done`/`abandoned` when it resolves. Update as work happens, not in a batch at the end.
+- Follow every action that produced an outcome with a `flow_result`. The action says what you did; the result says what you learned.
+- **Attach a figure to results whenever anything visual exists** — a plot, screenshot, benchmark chart, diagram. Use `flow_figure`. Results without evidence are weak.
+- Prefer marking a branch `abandoned` over deleting it. A visible dead end tells the reader it was considered; a gap tells them nothing.
+- Use `after:` to chain nodes — it draws the edge for you.
+
+## Content style
+
+Node bodies are **bullets, not prose**. One short clause each, no trailing periods. The server rejects paragraph-shaped bullets.
+
+Good: `["pg_trgm GIN index", "keeps fuzzy matching", "writes 6% slower"]`
+Bad: `["We decided to use a trigram index because it keeps fuzzy matching working."]`
+
+Keep node ids stable, lowercase and slug-like (`parse-config`), so later calls update the same node instead of creating duplicates.

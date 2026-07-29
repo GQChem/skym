@@ -1,0 +1,9 @@
+node_modules/
+dist/
+*.log
+
+# Charts are per-chat working state. To commit them in a project that uses
+# skym-flow, drop this line — assets/ and .lock are excluded just below.
+.flows/
+.flows/charts/*/assets/
+.flows/charts/*/.lock
