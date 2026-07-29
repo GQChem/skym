@@ -188,6 +188,39 @@ test("edges to unknown nodes are refused", async () => {
   }
 });
 
+test("folder puts the chart where asked", async () => {
+  const s = await boot();
+  try {
+    const r = await s.client.callTool({
+      name: "flow_init",
+      arguments: { title: "Placed", folder: "docs/design" },
+    });
+    assert.ok(!r.isError, text(r));
+    // SKYM_STATE_DIR is overridden by folder, which resolves against the cwd.
+    const dir = path.join(process.cwd(), "docs", "design", "charts", "placed");
+    assert.ok(fs.existsSync(path.join(dir, "graph.json")), `expected chart at ${dir}`);
+    fs.rmSync(path.join(process.cwd(), "docs"), { recursive: true, force: true });
+  } finally {
+    await s.client.close();
+  }
+});
+
+test("folder cannot escape the project directory", async () => {
+  const s = await boot();
+  try {
+    for (const bad of ["../outside", "../../etc", path.resolve("/tmp/elsewhere")]) {
+      const r = await s.client.callTool({
+        name: "flow_init",
+        arguments: { title: "Escape", folder: bad },
+      });
+      assert.ok(r.isError, `${bad} should be refused`);
+      assert.match(text(r), /inside the project directory/);
+    }
+  } finally {
+    await s.client.close();
+  }
+});
+
 test("charts persist under .flows with a slugged directory", async () => {
   const s = await boot();
   try {

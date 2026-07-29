@@ -32,7 +32,7 @@ Node bodies are concise bullets. The server rejects prose-shaped bullets, reject
 
 | Tool | Purpose |
 | --- | --- |
-| `flow_init` | Start this chat's chart and open the viewer. |
+| `flow_init` | Start this chat's chart and open the viewer. `folder:` chooses where it is saved. |
 | `flow_action` | Add/update an action. `after:` chains it to a previous node. |
 | `flow_result` | Add/update a result. Attach evidence with `flow_figure`. |
 | `flow_options` | Record a fork and seed its candidate branches. |
@@ -57,6 +57,8 @@ Node bodies are concise bullets. The server rejects prose-shaped bullets, reject
 
 Directories are named from the chart title, with a numeric suffix on collision. `graph.json` is written atomically (tmp + rename), so a crash mid-write cannot corrupt it.
 
+**Choosing the folder.** `flow_init` takes a `folder` argument to put a chart beside the work it documents — `flow_init({ title: "Cache benchmarks", folder: "experiments/run-3" })` writes to `experiments/run-3/charts/cache-benchmarks/`. Relative paths resolve against the project directory, and paths escaping it are refused. Without it, charts go to `.flows/`.
+
 **Resuming.** Calling `flow_init` with a title that already exists reattaches to that chart and continues its tree — so a chat picks up where it left off after a Claude Code restart. Pass `fresh: true` to force a new chart instead. A chart held by a *running* session is never adopted: each chat takes the next free suffix, enforced by an advisory `.lock` file claimed with an exclusive `wx` write. Locks whose process has died are swept automatically.
 
 The shipped `.gitignore` commits `graph.json` but ignores `assets/` — charts stay reviewable in diffs without dragging binaries into history. Delete that line to commit figures too.
@@ -64,6 +66,7 @@ The shipped `.gitignore` commits `graph.json` but ignores `assets/` — charts s
 ## Viewer
 
 - **Chart switcher** (top-left) moves between chats' charts. The live one is marked `● live`; others open read-only.
+- **Figures** toggles embedded images on the chart itself; off, nodes just note the count. Either way the side panel shows them, and clicking any figure zooms it.
 - **Click a node** for its bullets and figures; click a figure to zoom.
 - **Scroll** to zoom, **drag** to pan, **Fit** (or `f`) to re-centre. Pan/zoom survives live updates.
 - **Theme** toggles light/dark and persists. **SVG** exports the chart.

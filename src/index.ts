@@ -77,6 +77,21 @@ const bulletsSchema = z
     "Concise bullet points — the node body. One short clause each, no paragraphs, no trailing periods. E.g. [\"Swap cache to Redis\", \"TTL 60s\"].",
   );
 
+/**
+ * Charts are written wherever this points, so an absolute or `..` path would
+ * let a tool call write outside the project. Keep it contained.
+ */
+function resolveFolder(folder: string): string {
+  const abs = path.resolve(projectDir, folder);
+  const rel = path.relative(projectDir, abs);
+  if (rel.startsWith("..") || path.isAbsolute(rel)) {
+    throw new Error(
+      `folder must stay inside the project directory (${projectDir}); got "${folder}".`,
+    );
+  }
+  return abs;
+}
+
 function assertState(kind: NodeKind, state: string | undefined): NodeState | undefined {
   if (state === undefined) return undefined;
   const allowed = STATES_FOR[kind];
@@ -116,17 +131,24 @@ server.registerTool(
         .describe(
           "Force a new empty chart even if one with this title exists. Default false — reusing the same title resumes that chart, so a chat picks up where it left off after a restart.",
         ),
+      folder: z
+        .string()
+        .optional()
+        .describe(
+          "Where to save this chart and its figures. Relative paths resolve against the project directory; the chart lands in <folder>/charts/<slug>/. Defaults to '.flows'. Use this to keep a chart beside the work it documents, e.g. 'docs/design' or 'experiments/run-3'.",
+        ),
     },
   },
-  async ({ title, description, direction, fresh }) => {
-    const { resumed } = store.init(title, description, (direction as Direction) ?? "TD", fresh ?? false);
+  async ({ title, description, direction, fresh, folder }) => {
+    const root = folder ? resolveFolder(folder) : undefined;
+    const { resumed } = store.init(title, description, (direction as Direction) ?? "TD", fresh ?? false, root);
     const v = await ensureViewer();
     const g = store.get();
     return ok(
       summary(
         resumed
-          ? `Resumed chart "${title}" (${store.chartId}) with ${g.nodes.length} existing nodes.`
-          : `Chart "${title}" ready (${store.chartId}).`,
+          ? `Resumed chart "${title}" with ${g.nodes.length} existing nodes.\nSaved in ${path.relative(projectDir, store.chartDir) || store.chartDir}`
+          : `Chart "${title}" ready.\nSaved in ${path.relative(projectDir, store.chartDir) || store.chartDir}`,
         resumed
           ? "Continue the existing tree — check current states before adding nodes, and reuse existing ids to update them."
           : "Next: add an options node for the choices you see, or an action node for what you're doing first.",

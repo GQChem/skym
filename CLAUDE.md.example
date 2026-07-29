@@ -4,6 +4,8 @@ This project uses the `skym-flow` MCP server to keep a live visual chart of what
 
 Call `flow_init` once at the start of a chat, titled with what this chat is about ("Fixing the auth redirect loop"). Each chat gets its own chart, saved under `.flows/charts/<slug>/`.
 
+Pass `folder` when the chart belongs beside the work it documents (`folder: "experiments/run-3"`); otherwise it defaults to `.flows`.
+
 Reusing the same title resumes that chart, so if a chat is restarted, call `flow_init` with the title you used before and continue the existing tree — check the current states before adding nodes, and reuse existing ids to update them rather than duplicating. Pass `fresh: true` only when you deliberately want to start over.
 
 ## The three node kinds

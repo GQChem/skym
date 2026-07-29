@@ -109,7 +109,8 @@ export class GraphStore {
   private graph: Graph;
   private listeners = new Set<(g: Graph) => void>();
 
-  readonly root: string;
+  /** Where charts live; `flow_init` may repoint this per chart. */
+  root: string;
   /** Doubles as the chart's directory name; re-slugged from the title on init. */
   chartId: string;
   /** Lock owner token, unique per store instance rather than per process. */
@@ -247,7 +248,14 @@ export class GraphStore {
     description?: string,
     direction: Direction = "TD",
     fresh = false,
+    root?: string,
   ): { graph: Graph; resumed: boolean } {
+    if (root && path.resolve(root) !== path.resolve(this.root)) {
+      // Moving to a different folder: drop the lock held under the old root.
+      this.release();
+      this.root = path.resolve(root);
+      fs.mkdirSync(path.join(this.root, "charts"), { recursive: true });
+    }
     const target = this.claimDir(title, fresh);
     const existing = fresh ? null : this.readGraphAt(target);
 

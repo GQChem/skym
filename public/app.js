@@ -14,6 +14,7 @@
   // Viewing another chat's chart is read-only — no live stream for it.
   let chartParam = new URLSearchParams(location.search).get("chart");
   let ownChartId = null;
+  let inlineFigs = localStorage.getItem("skym-inline-figs") === "1";
   let view = { x: 0, y: 0, k: 1 };
   let userMovedView = false;
   let renderToken = 0;
@@ -250,11 +251,55 @@
       }
     });
 
+    renderInlineFigures();
     if (!userMovedView) fit();
     else applyView();
     highlight();
     renderDetail();
     renderEvents();
+  };
+
+  // Figures are overlaid on the SVG rather than injected into mermaid labels,
+  // which keeps layout measurement (and therefore node sizing) intact.
+  const renderInlineFigures = () => {
+    canvas.querySelectorAll(".skym-inline-fig").forEach((e) => e.remove());
+    if (!inlineFigs || !state) return;
+    const svg = canvas.querySelector("svg");
+    if (!svg) return;
+    const q = chartParam ? `?chart=${encodeURIComponent(chartParam)}` : "";
+
+    for (const node of state.graph.nodes) {
+      if (!node.figures?.length) continue;
+      const el = [...canvas.querySelectorAll(".node")].find((e) => idMatches(e.id, node.id));
+      if (!el) continue;
+      // Draw into the reserved slot, positioned via screen rects so the node's
+      // own transform and the canvas zoom are both accounted for.
+      const slot = el.querySelector(".skym-fig-slot");
+      if (!slot) continue;
+      const sr = slot.getBoundingClientRect();
+      const svgRect = svg.getBoundingClientRect();
+      if (!sr.width || !sr.height) continue;
+      const vb = svg.viewBox.baseVal;
+      const sx = (vb?.width || svgRect.width) / svgRect.width;
+      const sy = (vb?.height || svgRect.height) / svgRect.height;
+      const x = (sr.left - svgRect.left) * sx + (vb?.x ?? 0);
+      const y = (sr.top - svgRect.top) * sy + (vb?.y ?? 0);
+
+      const img = document.createElementNS("http://www.w3.org/2000/svg", "image");
+      img.setAttribute("href", `/assets/${encodeURIComponent(node.figures[0].file)}${q}`);
+      img.setAttribute("x", x);
+      img.setAttribute("y", y);
+      img.setAttribute("width", sr.width * sx);
+      img.setAttribute("height", sr.height * sy);
+      img.setAttribute("preserveAspectRatio", "xMidYMid meet");
+      img.setAttribute("class", "skym-inline-fig skym-inline-img");
+      img.addEventListener("click", (ev) => {
+        ev.stopPropagation();
+        lightboxImg.src = img.getAttribute("href");
+        lightbox.hidden = false;
+      });
+      svg.appendChild(img);
+    }
   };
 
   // --- pan / zoom ---
@@ -303,6 +348,20 @@
   document.getElementById("fit").addEventListener("click", () => {
     userMovedView = false;
     fit();
+  });
+
+  const inlineBtn = document.getElementById("inline-figs");
+  const syncInlineBtn = () => {
+    inlineBtn.classList.toggle("active", inlineFigs);
+    document.body.classList.toggle("inline-figs", inlineFigs);
+  };
+
+  inlineBtn.addEventListener("click", async () => {
+    inlineFigs = !inlineFigs;
+    localStorage.setItem("skym-inline-figs", inlineFigs ? "1" : "0");
+    syncInlineBtn();
+    // The slot changes height, so mermaid must re-measure and re-lay out.
+    if (state) await render(state);
   });
 
   document.getElementById("panel-toggle").addEventListener("click", () => {
@@ -421,6 +480,7 @@
   const saved = localStorage.getItem("skym-theme");
   if (saved) document.documentElement.setAttribute("data-theme", saved);
   initMermaid();
+  syncInlineBtn();
   renderLegend();
   refreshCharts();
   setInterval(refreshCharts, 5000);

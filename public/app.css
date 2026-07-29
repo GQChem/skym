@@ -98,6 +98,24 @@ button {
 
 button:hover { border-color: var(--accent); color: var(--accent); }
 
+button.active {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: #fff;
+}
+
+button.active:hover { color: #fff; filter: brightness(1.1); }
+
+.skym-inline-img {
+  cursor: zoom-in;
+  filter: drop-shadow(0 2px 6px rgba(0, 0, 0, 0.18));
+}
+
+/* The slot only takes up space while inline figures are on. */
+.skym-fig-slot { height: 0 !important; }
+body.inline-figs .skym-fig-slot { height: 138px !important; }
+body.inline-figs .skym-fig-count { display: none; }
+
 main {
   flex: 1 1 auto;
   display: flex;

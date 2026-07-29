@@ -49,7 +49,14 @@ function nodeLabel(n: FlowNode): string {
     return `• ${escapeLabel(t)}`;
   });
   const more = n.bullets.length > shown.length ? [`<i>+${n.bullets.length - shown.length} more</i>`] : [];
-  const figs = n.figures.length ? [`🖼 ${n.figures.length} figure${n.figures.length > 1 ? "s" : ""}`] : [];
+  // A tall transparent spacer reserves room the viewer draws the figure into
+  // when inline mode is on; the emoji line is the fallback when it is off.
+  const figs = n.figures.length
+    ? [
+        `<span class='skym-fig-slot' style='display:inline-block;width:230px;height:138px'></span>`,
+        `<span class='skym-fig-count'>🖼 ${n.figures.length} figure${n.figures.length > 1 ? "s" : ""}</span>`,
+      ]
+    : [];
   // A zero-ink spacer line sets a minimum measured width for short nodes.
   const spacer = "<span style='display:inline-block;width:250px'></span>";
   return [head, ...bullets, ...more, ...figs, spacer].join("<br/>");
