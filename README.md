@@ -40,9 +40,22 @@ Node bodies are concise bullets. The server rejects prose-shaped bullets, reject
 | `flow_options` | Record a fork and seed its candidate branches. |
 | `flow_state` | Move a node to a new state as work progresses. |
 | `flow_edge` | Link nodes when the relation is not a simple follow-on. |
+| `flow_chart` | Draw a chart from data — no image generation, styled to match the cards. |
 | `flow_figure` | Embed an image on a node, from a path or base64. `replace:` swaps it instead of appending. |
 | `flow_remove` | Delete a node or edge — prefer `abandoned` over deleting. |
 | `flow_show` | Return Mermaid source; `list_charts:true` lists other chats' charts. |
+
+## Charts from data
+
+`flow_chart` draws the figure instead of generating an image — point it at numbers and it renders in the chart's own palette, so evidence costs no image generation and never looks pasted in:
+
+```
+flow_chart({ node_id: "bench", kind: "bar", unit: "ms", title: "p99 by build",
+             points: [{ label: "before", value: 840 },
+                      { label: "after", value: 190, emphasis: true }] })
+```
+
+Three forms, picked by what the reader has to do: **bar** to compare magnitudes, **line** for change over time, **stat** for a single headline number. `emphasis` marks the one point that matters and lets the rest recede. Charts are stored as ordinary SVG figures, so they zoom, export, and embed in `flow.html` like any other. Use `flow_figure` when the evidence is a real screenshot or an externally produced plot.
 
 ## Storage
 

@@ -35,7 +35,7 @@ test("exposes the expected tool surface", async () => {
   try {
     const names = (await s.client.listTools()).tools.map((t) => t.name).sort();
     assert.deepEqual(names, [
-      "flow_action", "flow_edge", "flow_figure", "flow_init",
+      "flow_action", "flow_chart", "flow_edge", "flow_figure", "flow_init",
       "flow_options", "flow_remove", "flow_result", "flow_show", "flow_state",
     ]);
   } finally {
@@ -271,6 +271,65 @@ test("charts persist under .flows with a slugged directory", async () => {
     assert.ok(fs.existsSync(path.join(dir, "graph.json")));
     const saved = JSON.parse(fs.readFileSync(path.join(dir, "graph.json"), "utf8"));
     assert.equal(saved.title, "My Great Chart!");
+  } finally {
+    await s.client.close();
+  }
+});
+
+test("flow_chart attaches a data-drawn figure without an image", async () => {
+  const s = await boot();
+  try {
+    const call = (name, args) => s.client.callTool({ name, arguments: args });
+    await call("flow_init", { title: "Charts" });
+    await call("flow_result", { id: "r", title: "Latency", state: "good" });
+    const out = await call("flow_chart", {
+      node_id: "r",
+      kind: "bar",
+      unit: "ms",
+      title: "p99 by build",
+      points: [
+        { label: "before", value: 840 },
+        { label: "after", value: 190, emphasis: true },
+      ],
+      caption: "p99 before and after",
+    });
+    assert.ok(!out.isError, text(out));
+    assert.match(text(out), /Chart attached/);
+
+    // The chart lands as a normal SVG figure, so everything downstream works.
+    const assets = path.join(s.root, "charts", "charts", "assets");
+    const files = fs.readdirSync(assets);
+    const svg = files.find((f) => f.endsWith(".svg"));
+    assert.ok(svg, "chart should be stored as an svg asset");
+    const body = fs.readFileSync(path.join(assets, svg), "utf8");
+    assert.match(body, /^<svg /);
+    assert.ok(body.includes("840ms"));
+    assert.ok(body.includes("190ms"));
+  } finally {
+    await s.client.close();
+  }
+});
+
+test("flow_chart rejects data it cannot draw honestly", async () => {
+  const s = await boot();
+  try {
+    const call = (name, args) => s.client.callTool({ name, arguments: args });
+    await call("flow_init", { title: "Chart guards" });
+    await call("flow_result", { id: "r", title: "X", state: "good" });
+
+    const twoStats = await call("flow_chart", {
+      node_id: "r",
+      kind: "stat",
+      points: [{ label: "a", value: 1 }, { label: "b", value: 2 }],
+    });
+    assert.ok(twoStats.isError, "a stat shows one number");
+
+    const missing = await call("flow_chart", {
+      node_id: "ghost",
+      kind: "bar",
+      points: [{ label: "a", value: 1 }],
+    });
+    assert.ok(missing.isError, "unknown node must be rejected");
   } finally {
     await s.client.close();
   }

@@ -14,6 +14,8 @@ import {
   type NodeState,
 } from "./store.js";
 import { toMermaid } from "./mermaid.js";
+import { renderChart, validateChart } from "./chart.js";
+import { DEFAULT_THEME, paletteFor } from "./theme.js";
 import { startViewer, type Viewer } from "./server.js";
 
 const projectDir = process.env.SKYM_PROJECT_DIR ?? process.cwd();
@@ -373,6 +375,58 @@ server.registerTool(
           : `Figure attached to "${node_id}".`,
       ),
     );
+  },
+);
+
+server.registerTool(
+  "flow_chart",
+  {
+    title: "Draw a chart from data",
+    description:
+      "Attach a chart to a node from numbers directly — no image generation, and it is drawn in the chart's own palette so it matches the cards. Prefer this over flow_figure whenever the evidence is numeric. Use kind:'bar' to compare values, 'line' for a trend, 'stat' for a single headline number.",
+    inputSchema: {
+      node_id: z.string().describe("Node to attach the chart to — normally a result."),
+      kind: z
+        .enum(["bar", "line", "stat"])
+        .describe(
+          "bar = compare magnitudes; line = change over time; stat = one headline number. Pick by what the reader must do.",
+        ),
+      points: z
+        .array(
+          z.object({
+            label: z.string().min(1).describe("Category, time bucket, or (for a stat) what the number is."),
+            value: z.number().describe("The measurement."),
+            emphasis: z
+              .boolean()
+              .optional()
+              .describe("Marks the one point that matters; the rest recede. Use sparingly."),
+          }),
+        )
+        .min(1)
+        .max(12)
+        .describe("The data. At most 12 — past that a card-sized chart cannot label the points."),
+      title: z.string().optional().describe("Short label above the chart, e.g. 'p99 by build'."),
+      unit: z.string().optional().describe("Appended to values, e.g. 'ms', '%', 'MB'."),
+      delta: z.string().optional().describe("Stat only: the change, e.g. '-77% vs baseline'."),
+      caption: z.string().optional().describe("What the chart shows."),
+      replace: z.boolean().optional().describe("Drop existing figures on the node instead of appending."),
+    },
+  },
+  async ({ node_id, kind, points, title, unit, delta, caption, replace }) => {
+    const node = store.findNode(node_id);
+    if (!node) throw new Error(`No node with id "${node_id}".`);
+    const spec = { kind, points, title, unit, delta };
+    validateChart(spec);
+
+    // Rendered light: the card lays figures on a light plate in both themes.
+    const palette = paletteFor(DEFAULT_THEME, "light");
+    const accent = palette.states[node.state]?.accent ?? palette.focus;
+    const box = { width: 320, height: kind === "stat" ? 120 : 170 };
+    const svg = renderChart(spec, box, DEFAULT_THEME, palette, accent);
+
+    store.attachFigure(node_id, Buffer.from(svg, "utf8"), "image/svg+xml", caption, "svg", replace ?? false);
+    await ensureViewer();
+    return ok(summary(`Chart attached to "${node_id}" (${kind}, ${points.length} points).`));
   },
 );
 
