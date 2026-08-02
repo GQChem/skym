@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import dagre from "@dagrejs/dagre";
-import { layoutGraph, measureNode, textWidth, wrap } from "../dist/layout.js";
+import { detailForZoom, layoutGraph, measureNode, textWidth, wrap } from "../dist/layout.js";
 import { DEFAULT_THEME, resolveTheme } from "../dist/theme.js";
 
 const node = (over = {}) => ({
@@ -244,4 +244,53 @@ test("a figure holds the card open at the ceiling", () => {
   const m = measureNode(withFig, DEFAULT_THEME, true);
   assert.equal(m.w, DEFAULT_THEME.card.width, "figures should use the full width");
   assert.equal(m.figure.w, m.w - DEFAULT_THEME.card.padX * 2 - DEFAULT_THEME.card.stripe);
+});
+
+test("detail level follows zoom", () => {
+  assert.equal(detailForZoom(1), "full");
+  assert.equal(detailForZoom(0.6), "full");
+  assert.equal(detailForZoom(0.4), "compact");
+  assert.equal(detailForZoom(0.2), "title");
+});
+
+test("compact drops bullets, title drops the figure too", () => {
+  const n = node({
+    title: "A node",
+    bullets: ["one", "two", "three"],
+    figures: [{ id: "f", file: "a.png", mime: "image/png" }],
+  });
+  const full = measureNode(n, DEFAULT_THEME, true, "full");
+  const compact = measureNode(n, DEFAULT_THEME, true, "compact");
+  const title = measureNode(n, DEFAULT_THEME, true, "title");
+
+  assert.ok(full.bulletLines.length > 0);
+  assert.equal(compact.bulletLines.length, 0, "compact should drop bullets");
+  assert.equal(title.bulletLines.length, 0);
+
+  assert.ok(compact.figure, "compact keeps the figure — shape reads when text does not");
+  assert.equal(title.figure, undefined, "title level shows only the headline");
+
+  assert.ok(full.h > compact.h, "shedding bullets must shrink the card");
+  assert.ok(compact.h > title.h, "shedding the figure must shrink it further");
+});
+
+test("the title survives every detail level", () => {
+  for (const d of ["full", "compact", "title"]) {
+    const m = measureNode(node({ title: "Keep me" }), DEFAULT_THEME, false, d);
+    assert.ok(m.titleLines.join(" ").includes("Keep me"), `${d} lost the title`);
+  }
+});
+
+test("lower detail makes the whole graph smaller", () => {
+  const nodes = ["a", "b", "c"].map((id) =>
+    node({ id, title: `Node ${id}`, bullets: ["a bullet", "another bullet", "a third"] }),
+  );
+  const edges = [
+    { id: "e1", from: "a", to: "b", dashed: false },
+    { id: "e2", from: "b", to: "c", dashed: false },
+  ];
+  const g = graph(nodes, edges);
+  const full = layoutGraph(g, DEFAULT_THEME, dagre, false, "full");
+  const title = layoutGraph(g, DEFAULT_THEME, dagre, false, "title");
+  assert.ok(title.height < full.height, "title level should be more compact");
 });

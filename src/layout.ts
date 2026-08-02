@@ -114,13 +114,32 @@ function truncateToWidth(text: string, size: number, maxWidth: number, weight = 
 }
 
 /**
+ * How much of a card is worth drawing. Below roughly 55% zoom bullet text is
+ * illegible, so rendering it only makes cards large and the graph sparse —
+ * shedding detail lets more structure fit on screen instead.
+ */
+export type Detail = "full" | "compact" | "title";
+
+/** Zoom thresholds for automatic detail selection. */
+export function detailForZoom(k: number): Detail {
+  if (k < 0.3) return "title";
+  if (k < 0.55) return "compact";
+  return "full";
+}
+
+/**
  * Measures a card so dagre can lay out real boxes rather than guesses.
  *
  * `card.width` is a ceiling, not a fixed size: text wraps at it, then the card
  * shrinks back to whatever the longest line actually needs. A narrow setting
  * therefore yields compact cards rather than tall ones padded with dead space.
  */
-export function measureNode(node: FlowNode, theme: Theme, showFigures: boolean): LaidOutNode {
+export function measureNode(
+  node: FlowNode,
+  theme: Theme,
+  showFigures: boolean,
+  detail: Detail = "full",
+): LaidOutNode {
   const { card, type } = theme;
   const chrome = card.padX * 2 + card.stripe;
   const inner = card.width - chrome;
@@ -136,19 +155,27 @@ export function measureNode(node: FlowNode, theme: Theme, showFigures: boolean):
     );
   }
 
+  // Bullets are the first thing to go: they carry the most ink for the least
+  // legibility once the view is zoomed out.
   const bulletLines: Line[] = [];
   let hiddenBullets = 0;
-  for (const bullet of node.bullets) {
-    if (bulletLines.length >= MAX_BULLET_LINES) {
-      hiddenBullets++;
-      continue;
-    }
-    const wrapped = wrap(bullet, type.bulletSize, inner - MARKER_INDENT);
-    for (let i = 0; i < wrapped.length; i++) {
-      if (bulletLines.length >= MAX_BULLET_LINES) break;
-      bulletLines.push({ text: wrapped[i], first: i === 0 });
+  if (detail === "full") {
+    for (const bullet of node.bullets) {
+      if (bulletLines.length >= MAX_BULLET_LINES) {
+        hiddenBullets++;
+        continue;
+      }
+      const wrapped = wrap(bullet, type.bulletSize, inner - MARKER_INDENT);
+      for (let i = 0; i < wrapped.length; i++) {
+        if (bulletLines.length >= MAX_BULLET_LINES) break;
+        bulletLines.push({ text: wrapped[i], first: i === 0 });
+      }
     }
   }
+
+  // A figure still reads as a shape when its labels do not, so it survives one
+  // step longer than the bullets; at title level nothing but the headline is left.
+  const wantFigure = showFigures && detail !== "title";
 
   const metaH = type.metaSize + 7;
   const titleH = titleLines.length * type.titleLeading;
@@ -163,19 +190,20 @@ export function measureNode(node: FlowNode, theme: Theme, showFigures: boolean):
     ...titleLines.map((t) => textWidth(t, type.titleSize, type.titleWeight)),
     ...bulletLines.map((b) => MARKER_INDENT + textWidth(b.text, type.bulletSize)),
     // A figure is laid out against the ceiling, so it pins the card open.
-    showFigures && node.figures.length ? inner : 0,
+    wantFigure && node.figures.length ? inner : 0,
   );
   const width = Math.min(card.width, Math.ceil(contentW) + chrome);
   const innerFinal = width - chrome;
 
   let figure: LaidOutNode["figure"];
   let figureH = 0;
-  if (showFigures && node.figures.length) {
+  if (wantFigure && node.figures.length) {
     const w = innerFinal;
     const h = Math.round(w * card.figureRatio);
     figureH = card.gap + h;
     figure = { x: card.stripe + card.padX, y: 0, w, h };
-  } else if (node.figures.length) {
+  } else if (node.figures.length && detail === "full") {
+    // The "N figures" note is itself small print; drop it with the bullets.
     figureH = card.gap + type.metaSize + 4;
   }
 
@@ -266,8 +294,9 @@ export function layoutGraph(
   theme: Theme,
   dagre: DagreLike,
   showFigures: boolean,
+  detail: Detail = "full",
 ): LayoutResult {
-  const measured = graph.nodes.map((n) => measureNode(n, theme, showFigures));
+  const measured = graph.nodes.map((n) => measureNode(n, theme, showFigures, detail));
   const byId = new Map(measured.map((m) => [m.id, m]));
   const vertical = graph.direction === "TD" || graph.direction === "BT";
 

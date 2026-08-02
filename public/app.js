@@ -1,5 +1,5 @@
 import dagre from "./vendor/dagre.js";
-import { layoutGraph } from "./vendor/layout.js";
+import { detailForZoom, layoutGraph } from "./vendor/layout.js";
 import { renderSvg } from "./vendor/render.js";
 import { DEFAULT_THEME, KIND_LABEL, STATE_GLYPH, paletteFor, resolveTheme } from "./vendor/theme.js";
 
@@ -34,6 +34,10 @@ let showFigures = store.get("inline-figs", "1") === "1";
 let mode = store.get("theme", matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light");
 let view = { x: 0, y: 0, k: 1 };
 let userMovedView = false;
+/** Detail currently drawn; re-layout only when the zoom crosses a threshold. */
+let detail = "full";
+/** "auto" follows zoom; the other values pin a level from the toolbar. */
+let detailMode = store.get("detail", "auto");
 
 document.documentElement.setAttribute("data-theme", mode);
 
@@ -54,7 +58,7 @@ const applyView = () => {
   canvas.style.transform = `translate(${view.x}px, ${view.y}px) scale(${view.k})`;
 };
 
-const fit = () => {
+const fitOnce = () => {
   if (!lastLayout || !lastLayout.width) return;
   const pad = 56;
   const k = Math.min(
@@ -66,6 +70,27 @@ const fit = () => {
   view.x = (stage.clientWidth - lastLayout.width * view.k) / 2;
   view.y = (stage.clientHeight - lastLayout.height * view.k) / 2;
   applyView();
+};
+
+/**
+ * Fitting sets a zoom, which may change the detail level, which changes the
+ * layout — so fit again against the new geometry. The guard bounds this to one
+ * extra pass: draw() calls fit(), and without it the two would recurse.
+ */
+let refitting = false;
+
+const fit = () => {
+  fitOnce();
+  if (refitting || detailMode !== "auto" || !state) return;
+  if (detailForZoom(view.k) !== detail) {
+    refitting = true;
+    try {
+      draw();
+      fitOnce();
+    } finally {
+      refitting = false;
+    }
+  }
 };
 
 // --- rendering ---
@@ -86,7 +111,8 @@ const draw = () => {
     return;
   }
 
-  lastLayout = layoutGraph(graph, theme, dagre, showFigures);
+  detail = detailMode === "auto" ? detailForZoom(view.k) : detailMode;
+  lastLayout = layoutGraph(graph, theme, dagre, showFigures, detail);
   canvas.innerHTML = renderSvg(lastLayout, {
     theme,
     palette: paletteFor(theme, mode),
@@ -352,9 +378,31 @@ stage.addEventListener(
     view.k = k;
     userMovedView = true;
     applyView();
+    maybeRelayout();
   },
   { passive: false },
 );
+
+/**
+ * Cards shed bullets and figures as the view zooms out, which changes their
+ * size — so crossing a threshold is a re-layout, not just a repaint. The graph
+ * is re-centred on whatever the viewport was looking at, or the whole thing
+ * appears to jump when the geometry changes underneath.
+ */
+const maybeRelayout = () => {
+  if (detailMode !== "auto" || !state || !lastLayout) return;
+  const next = detailForZoom(view.k);
+  if (next === detail) return;
+
+  const cx = (stage.clientWidth / 2 - view.x) / view.k / lastLayout.width;
+  const cy = (stage.clientHeight / 2 - view.y) / view.k / lastLayout.height;
+  draw();
+  if (lastLayout) {
+    view.x = stage.clientWidth / 2 - cx * lastLayout.width * view.k;
+    view.y = stage.clientHeight / 2 - cy * lastLayout.height * view.k;
+    applyView();
+  }
+};
 
 // --- chrome ---
 
@@ -371,6 +419,15 @@ widthEl.addEventListener("input", () => {
   theme = resolveTheme(theme, { card: { width } });
   widthEl.title = `Card width: ${width}px`;
   store.set("node-width", width);
+  draw();
+});
+
+const detailEl = $("detail");
+detailEl.value = detailMode;
+
+detailEl.addEventListener("change", () => {
+  detailMode = detailEl.value;
+  store.set("detail", detailMode);
   draw();
 });
 

@@ -91,6 +91,7 @@ The shipped `.gitignore` commits `graph.json` but ignores `assets/` — charts s
 - **Figures** toggles embedded images on the cards; off, nodes just note the count. Either way the side panel shows them, and clicking any figure zooms it.
 - **Click a node** for its bullets and figures; **right-click** for its actions (work on it, copy id, copy node).
 - **Scroll** to zoom, **drag** to pan, **Fit** (or `f`) to re-centre. Pan/zoom survives live updates.
+- **Detail** follows the zoom: cards shed bullets, then figures, keeping only the headline when zoomed out — so a large chart stays readable as structure. Cards re-measure at each level, so the whole graph gets tighter rather than just clipping. Pin a level from the dropdown to override.
 - **Theme** toggles light/dark and persists — layout runs in the page, so it repaints without a round trip.
 - **SVG** exports the chart. **Legend** documents the state vocabulary; **Activity** lists recent revisions.
 
