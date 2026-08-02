@@ -1,6 +1,7 @@
 import { randomUUID } from "node:crypto";
 import fs from "node:fs";
 import path from "node:path";
+import { writeOfflineHtml } from "./offline.js";
 
 export type NodeKind = "action" | "result" | "options";
 
@@ -164,6 +165,7 @@ export class GraphStore {
     fs.writeFileSync(tmp, JSON.stringify(this.graph, null, 2), "utf8");
     fs.renameSync(tmp, this.statePath);
     this.writeIndex();
+    writeOfflineHtml(this.graph, this.chartDir, this.assetsDir);
   }
 
   /** Index lets the viewer list every chat's chart without opening each one. */
@@ -493,13 +495,32 @@ export class GraphStore {
     return this.commit("node.state", `${id}=${state}`);
   }
 
-  attachFigure(nodeId: string, data: Buffer, mime: string, caption?: string, ext = "png"): Graph {
+  attachFigure(
+    nodeId: string,
+    data: Buffer,
+    mime: string,
+    caption?: string,
+    ext = "png",
+    replace = false,
+  ): Graph {
     const node = this.findNode(nodeId);
     if (!node) throw new Error(`No node with id "${nodeId}".`);
     const file = `${nodeId.replace(/[^a-zA-Z0-9_-]/g, "_")}-${Date.now()}.${ext}`;
     fs.writeFileSync(path.join(this.assetsDir, file), data);
+    if (replace) {
+      // Drop the asset files too, or a corrected figure leaves the broken one
+      // orphaned on disk.
+      for (const old of node.figures) {
+        try {
+          fs.unlinkSync(path.join(this.assetsDir, old.file));
+        } catch {
+          // already gone; the reference is what matters
+        }
+      }
+      node.figures = [];
+    }
     node.figures.push({ id: randomUUID(), file, caption, mime });
     node.updatedAt = Date.now();
-    return this.commit("figure.add", `${nodeId}:${file}`);
+    return this.commit(replace ? "figure.replace" : "figure.add", `${nodeId}:${file}`);
   }
 }

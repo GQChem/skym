@@ -170,21 +170,14 @@ export function measureNode(node: FlowNode, theme: Theme, showFigures: boolean):
   };
 }
 
-type DagreLike = {
-  graphlib: { Graph: new (opts?: unknown) => DagreGraph };
-  layout: (g: DagreGraph) => void;
+/**
+ * Structural view of the dagre entry point. Kept loose so the browser copy and
+ * the node import satisfy it identically.
+ */
+export type DagreLike = {
+  graphlib: { Graph: new (opts?: any) => any };
+  layout: (g: any) => void;
 };
-
-interface DagreGraph {
-  setGraph: (opts: Record<string, unknown>) => void;
-  setDefaultEdgeLabel: (fn: () => unknown) => void;
-  setNode: (id: string, value: Record<string, unknown>) => void;
-  setEdge: (from: string, to: string, value?: Record<string, unknown>, name?: string) => void;
-  node: (id: string) => { x: number; y: number; width: number; height: number } | undefined;
-  edge: (e: unknown) => { points: { x: number; y: number }[] } | undefined;
-  edges: () => unknown[];
-  graph: () => { width?: number; height?: number };
-}
 
 /**
  * Rounded orthogonal routing: dagre gives a polyline through rank channels,

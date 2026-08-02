@@ -78,18 +78,11 @@ const bulletsSchema = z
   );
 
 /**
- * Charts are written wherever this points, so an absolute or `..` path would
- * let a tool call write outside the project. Keep it contained.
+ * Relative paths resolve against the project; absolute paths are taken as
+ * given, so a chart can live beside work that is not inside the project.
  */
 function resolveFolder(folder: string): string {
-  const abs = path.resolve(projectDir, folder);
-  const rel = path.relative(projectDir, abs);
-  if (rel.startsWith("..") || path.isAbsolute(rel)) {
-    throw new Error(
-      `folder must stay inside the project directory (${projectDir}); got "${folder}".`,
-    );
-  }
-  return abs;
+  return path.resolve(projectDir, folder);
 }
 
 function assertState(kind: NodeKind, state: string | undefined): NodeState | undefined {
@@ -346,9 +339,15 @@ server.registerTool(
       base64: z.string().optional().describe("Raw base64 image data."),
       mime: z.string().optional().describe("MIME for base64, e.g. 'image/png' or 'image/svg+xml'."),
       caption: z.string().optional().describe("What the figure shows."),
+      replace: z
+        .boolean()
+        .optional()
+        .describe(
+          "Drop the node's existing figures (and their files) instead of appending. Use when re-attaching a corrected version of the same figure.",
+        ),
     },
   },
-  async ({ node_id, path: filePath, base64, mime, caption }) => {
+  async ({ node_id, path: filePath, base64, mime, caption, replace }) => {
     if (!filePath && !base64) throw new Error("Provide either 'path' or 'base64'.");
     let data: Buffer;
     let ext = "png";
@@ -364,9 +363,16 @@ server.registerTool(
       // "image/svg+xml" must yield "svg", not "svg+xml".
       ext = (type.split("/")[1] ?? "png").split("+")[0].replace("jpeg", "jpg");
     }
-    store.attachFigure(node_id, data, type, caption, ext);
+    const had = store.findNode(node_id)?.figures.length ?? 0;
+    store.attachFigure(node_id, data, type, caption, ext, replace ?? false);
     await ensureViewer();
-    return ok(summary(`Figure attached to "${node_id}".`));
+    return ok(
+      summary(
+        replace && had
+          ? `Figure replaced on "${node_id}" (${had} removed).`
+          : `Figure attached to "${node_id}".`,
+      ),
+    );
   },
 );
 

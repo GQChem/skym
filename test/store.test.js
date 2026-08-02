@@ -20,6 +20,29 @@ test("init slugs the directory from the title", () => {
   s.init("Fix the Auth Redirect!");
   assert.equal(s.chartId, "fix-the-auth-redirect");
   assert.ok(fs.existsSync(path.join(root, "charts", "fix-the-auth-redirect", "graph.json")));
+  assert.ok(fs.existsSync(path.join(root, "charts", "fix-the-auth-redirect", "flow.html")));
+});
+
+test("offline HTML is self-contained and refreshed with graph and figures", () => {
+  const root = tmp();
+  const s = mk(root);
+  s.init('Offline </script> "Chart"');
+  s.upsertNode({ id: "result", title: "Portable result", kind: "result", state: "good", bullets: ["Stored inline"] });
+  s.attachFigure("result", Buffer.from("image bytes"), "image/png", "Evidence");
+
+  const file = path.join(s.chartDir, "flow.html");
+  const html = fs.readFileSync(file, "utf8");
+  assert.match(html, /^<!doctype html>/);
+  assert.match(html, /offline snapshot/);
+  assert.match(html, /Portable result/);
+  assert.match(html, /data:image\/png;base64,aW1hZ2UgYnl0ZXM=/);
+  assert.doesNotMatch(html, /src=["']https?:/);
+  assert.match(html, /Offline &lt;\/script&gt; &quot;Chart&quot;/);
+  assert.match(html, /rev 3 · offline snapshot/);
+  // Both themes ship pre-rendered, so the file needs no layout engine at runtime.
+  assert.match(html, /id="skym-svg-light"/);
+  assert.match(html, /id="skym-svg-dark"/);
+  assert.doesNotMatch(html, /mermaid/i);
 });
 
 test("same title resumes the existing chart", () => {

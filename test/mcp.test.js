@@ -175,6 +175,48 @@ test("svg+xml figures get a .svg extension", async () => {
   }
 });
 
+test("replace swaps the figure and deletes the old file", async () => {
+  const s = await boot();
+  try {
+    const call = (name, args) => s.client.callTool({ name, arguments: args });
+    await call("flow_init", { title: "Replace" });
+    await call("flow_result", { id: "r", state: "good" });
+    const svg = (body) => Buffer.from(body).toString("base64");
+    await call("flow_figure", {
+      node_id: "r",
+      base64: svg("<svg xmlns='http://www.w3.org/2000/svg'><!--first--></svg>"),
+      mime: "image/svg+xml",
+    });
+    const assets = path.join(s.root, "charts", "replace", "assets");
+    assert.equal(fs.readdirSync(assets).length, 1);
+
+    // Appending without the flag keeps both.
+    await call("flow_figure", {
+      node_id: "r",
+      base64: svg("<svg xmlns='http://www.w3.org/2000/svg'><!--second--></svg>"),
+      mime: "image/svg+xml",
+    });
+    assert.equal(fs.readdirSync(assets).length, 2);
+
+    const r = await call("flow_figure", {
+      node_id: "r",
+      base64: svg("<svg xmlns='http://www.w3.org/2000/svg'><!--third--></svg>"),
+      mime: "image/svg+xml",
+      replace: true,
+    });
+    assert.match(text(r), /replaced/);
+    const left = fs.readdirSync(assets);
+    assert.equal(left.length, 1, `stale assets left behind: ${left.join(", ")}`);
+    assert.match(
+      fs.readFileSync(path.join(assets, left[0]), "utf8"),
+      /third/,
+      "the surviving file should be the newest",
+    );
+  } finally {
+    await s.client.close();
+  }
+});
+
 test("edges to unknown nodes are refused", async () => {
   const s = await boot();
   try {
@@ -205,17 +247,17 @@ test("folder puts the chart where asked", async () => {
   }
 });
 
-test("folder cannot escape the project directory", async () => {
+test("folder may point outside the project directory", async () => {
   const s = await boot();
   try {
-    for (const bad of ["../outside", "../../etc", path.resolve("/tmp/elsewhere")]) {
-      const r = await s.client.callTool({
-        name: "flow_init",
-        arguments: { title: "Escape", folder: bad },
-      });
-      assert.ok(r.isError, `${bad} should be refused`);
-      assert.match(text(r), /inside the project directory/);
-    }
+    const outside = path.join(os.tmpdir(), `skym-outside-${Date.now()}`);
+    const r = await s.client.callTool({
+      name: "flow_init",
+      arguments: { title: "Outside", folder: outside },
+    });
+    assert.ok(!r.isError, text(r));
+    assert.ok(fs.existsSync(path.join(outside, "charts")), "chart written outside the project");
+    fs.rmSync(outside, { recursive: true, force: true });
   } finally {
     await s.client.close();
   }
