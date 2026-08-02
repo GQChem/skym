@@ -1,0 +1,376 @@
+import type { FlowNode, Graph } from "./store.js";
+import type { Theme } from "./theme.js";
+
+export interface Line {
+  text: string;
+  /** Bullets that wrapped keep their marker only on the first line. */
+  first: boolean;
+}
+
+export interface LaidOutNode {
+  id: string;
+  node: FlowNode;
+  x: number;
+  y: number;
+  w: number;
+  h: number;
+  titleLines: string[];
+  bulletLines: Line[];
+  /** Reserved figure box in card-local coordinates, when the node has one. */
+  figure?: { x: number; y: number; w: number; h: number };
+  hiddenBullets: number;
+}
+
+export interface LaidOutEdge {
+  id: string;
+  from: string;
+  to: string;
+  label?: string;
+  dashed: boolean;
+  path: string;
+  labelPos?: { x: number; y: number };
+}
+
+export interface LaidOutCluster {
+  name: string;
+  x: number;
+  y: number;
+  w: number;
+  h: number;
+}
+
+export interface LayoutResult {
+  nodes: LaidOutNode[];
+  edges: LaidOutEdge[];
+  clusters: LaidOutCluster[];
+  width: number;
+  height: number;
+}
+
+/**
+ * Average glyph widths as a fraction of font size, sampled from the UI sans at
+ * the sizes we render. Cheap, deterministic, and identical on server and client
+ * — a canvas measure would differ between the two and desync the offline file.
+ */
+const NARROW = new Set("ijltfIr!.,;:'\"|()[]{}/\\`-");
+const WIDE = new Set("mwMW@%");
+
+export function textWidth(text: string, size: number, weight = 400): number {
+  let units = 0;
+  for (const ch of text) {
+    if (NARROW.has(ch)) units += 0.32;
+    else if (WIDE.has(ch)) units += 0.92;
+    else if (ch === " ") units += 0.27;
+    else if (ch >= "A" && ch <= "Z") units += 0.66;
+    else if (ch >= "0" && ch <= "9") units += 0.56;
+    else units += 0.53;
+  }
+  // Semibold text sets slightly wider than regular at the same size.
+  const weighting = weight >= 600 ? 1.045 : 1;
+  return units * size * weighting;
+}
+
+export function wrap(text: string, size: number, maxWidth: number, weight = 400): string[] {
+  const words = text.split(/\s+/).filter(Boolean);
+  if (!words.length) return [];
+  const lines: string[] = [];
+  let line = "";
+  for (const word of words) {
+    const candidate = line ? `${line} ${word}` : word;
+    if (textWidth(candidate, size, weight) <= maxWidth || !line) {
+      line = candidate;
+    } else {
+      lines.push(line);
+      line = word;
+    }
+  }
+  if (line) lines.push(line);
+  return lines;
+}
+
+const MAX_TITLE_LINES = 3;
+const MAX_BULLET_LINES = 8;
+
+/** Always ends in an ellipsis: the caller uses it to signal dropped text. */
+function truncateToWidth(text: string, size: number, maxWidth: number, weight = 400): string {
+  let out = text;
+  while (out.length > 1 && textWidth(`${out}…`, size, weight) > maxWidth) {
+    out = out.slice(0, -1);
+  }
+  return `${out.trimEnd()}…`;
+}
+
+/** Measures a card so dagre can lay out real boxes rather than guesses. */
+export function measureNode(node: FlowNode, theme: Theme, showFigures: boolean): LaidOutNode {
+  const { card, type } = theme;
+  const inner = card.width - card.padX * 2 - card.stripe;
+
+  const rawTitle = wrap(node.title, type.titleSize, inner, type.titleWeight);
+  const titleLines = rawTitle.slice(0, MAX_TITLE_LINES);
+  if (rawTitle.length > MAX_TITLE_LINES) {
+    titleLines[MAX_TITLE_LINES - 1] = truncateToWidth(
+      titleLines[MAX_TITLE_LINES - 1],
+      type.titleSize,
+      inner,
+      type.titleWeight,
+    );
+  }
+
+  // Bullets hang from a marker, so wrapped lines indent to clear it.
+  const markerIndent = 11;
+  const bulletLines: Line[] = [];
+  let hiddenBullets = 0;
+  for (const bullet of node.bullets) {
+    if (bulletLines.length >= MAX_BULLET_LINES) {
+      hiddenBullets++;
+      continue;
+    }
+    const wrapped = wrap(bullet, type.bulletSize, inner - markerIndent);
+    for (let i = 0; i < wrapped.length; i++) {
+      if (bulletLines.length >= MAX_BULLET_LINES) break;
+      bulletLines.push({ text: wrapped[i], first: i === 0 });
+    }
+  }
+
+  const metaH = type.metaSize + 7;
+  const titleH = titleLines.length * type.titleLeading;
+  const bulletsH = bulletLines.length ? card.gap + bulletLines.length * type.bulletLeading : 0;
+
+  let figure: LaidOutNode["figure"];
+  let figureH = 0;
+  if (showFigures && node.figures.length) {
+    const w = inner;
+    const h = Math.round(w * card.figureRatio);
+    figureH = card.gap + h;
+    figure = { x: card.stripe + card.padX, y: 0, w, h };
+  } else if (node.figures.length) {
+    figureH = card.gap + type.metaSize + 4;
+  }
+
+  const h = Math.max(
+    card.minHeight,
+    card.padY * 2 + metaH + titleH + bulletsH + figureH,
+  );
+
+  if (figure) {
+    figure.y = card.padY + metaH + titleH + bulletsH + card.gap;
+  }
+
+  return {
+    id: node.id,
+    node,
+    x: 0,
+    y: 0,
+    w: card.width,
+    h,
+    titleLines,
+    bulletLines,
+    figure,
+    hiddenBullets,
+  };
+}
+
+type DagreLike = {
+  graphlib: { Graph: new (opts?: unknown) => DagreGraph };
+  layout: (g: DagreGraph) => void;
+};
+
+interface DagreGraph {
+  setGraph: (opts: Record<string, unknown>) => void;
+  setDefaultEdgeLabel: (fn: () => unknown) => void;
+  setNode: (id: string, value: Record<string, unknown>) => void;
+  setEdge: (from: string, to: string, value?: Record<string, unknown>, name?: string) => void;
+  node: (id: string) => { x: number; y: number; width: number; height: number } | undefined;
+  edge: (e: unknown) => { points: { x: number; y: number }[] } | undefined;
+  edges: () => unknown[];
+  graph: () => { width?: number; height?: number };
+}
+
+/**
+ * Rounded orthogonal routing: dagre gives a polyline through rank channels,
+ * which we square off and fillet so edges read as circuitry rather than noodles.
+ */
+function orthogonalPath(points: { x: number; y: number }[], radius: number, vertical: boolean): string {
+  if (points.length < 2) return "";
+  const start = points[0];
+  const end = points[points.length - 1];
+
+  // A straight shot needs no elbow.
+  if (Math.abs(start.x - end.x) < 1 || Math.abs(start.y - end.y) < 1) {
+    return `M${start.x.toFixed(1)},${start.y.toFixed(1)} L${end.x.toFixed(1)},${end.y.toFixed(1)}`;
+  }
+
+  // Single elbow at the midpoint of the travel axis.
+  const mid = vertical ? (start.y + end.y) / 2 : (start.x + end.x) / 2;
+  const r = Math.min(
+    radius,
+    Math.abs(vertical ? end.x - start.x : end.y - start.y) / 2,
+    Math.abs(vertical ? mid - start.y : mid - start.x),
+    Math.abs(vertical ? end.y - mid : end.x - mid),
+  );
+
+  if (vertical) {
+    const dirX = end.x > start.x ? 1 : -1;
+    const dirY = end.y > mid ? 1 : -1;
+    return [
+      `M${start.x.toFixed(1)},${start.y.toFixed(1)}`,
+      `L${start.x.toFixed(1)},${(mid - r * dirY).toFixed(1)}`,
+      `Q${start.x.toFixed(1)},${mid.toFixed(1)} ${(start.x + r * dirX).toFixed(1)},${mid.toFixed(1)}`,
+      `L${(end.x - r * dirX).toFixed(1)},${mid.toFixed(1)}`,
+      `Q${end.x.toFixed(1)},${mid.toFixed(1)} ${end.x.toFixed(1)},${(mid + r * dirY).toFixed(1)}`,
+      `L${end.x.toFixed(1)},${end.y.toFixed(1)}`,
+    ].join(" ");
+  }
+  const dirY = end.y > start.y ? 1 : -1;
+  const dirX = end.x > mid ? 1 : -1;
+  return [
+    `M${start.x.toFixed(1)},${start.y.toFixed(1)}`,
+    `L${(mid - r * dirX).toFixed(1)},${start.y.toFixed(1)}`,
+    `Q${mid.toFixed(1)},${start.y.toFixed(1)} ${mid.toFixed(1)},${(start.y + r * dirY).toFixed(1)}`,
+    `L${mid.toFixed(1)},${(end.y - r * dirY).toFixed(1)}`,
+    `Q${mid.toFixed(1)},${end.y.toFixed(1)} ${(mid + r * dirX).toFixed(1)},${end.y.toFixed(1)}`,
+    `L${end.x.toFixed(1)},${end.y.toFixed(1)}`,
+  ].join(" ");
+}
+
+const CLUSTER_PAD = 26;
+const CLUSTER_HEAD = 22;
+
+export function layoutGraph(
+  graph: Graph,
+  theme: Theme,
+  dagre: DagreLike,
+  showFigures: boolean,
+): LayoutResult {
+  const measured = graph.nodes.map((n) => measureNode(n, theme, showFigures));
+  const byId = new Map(measured.map((m) => [m.id, m]));
+  const vertical = graph.direction === "TD" || graph.direction === "BT";
+
+  const g = new dagre.graphlib.Graph({ compound: true, multigraph: true });
+  // Grouped charts need a wider rank gap: the cluster's frame and its title sit
+  // in that channel, and edges must clear both.
+  const hasGroups = graph.nodes.some((n) => n.group);
+  g.setGraph({
+    rankdir: graph.direction,
+    ranksep: theme.layout.rankGap + (hasGroups ? CLUSTER_PAD + CLUSTER_HEAD : 0),
+    nodesep: theme.layout.nodeGap,
+    marginx: 24,
+    marginy: 24,
+  });
+  g.setDefaultEdgeLabel(() => ({}));
+
+  const clusters = new Set<string>();
+  for (const m of measured) {
+    g.setNode(m.id, { width: m.w, height: m.h });
+    if (m.node.group) {
+      const cid = `cluster:${m.node.group}`;
+      if (!clusters.has(cid)) {
+        clusters.add(cid);
+        g.setNode(cid, {});
+      }
+      (g as unknown as { setParent: (a: string, b: string) => void }).setParent(m.id, cid);
+    }
+  }
+
+  const seen = new Set<string>();
+  for (const e of graph.edges) {
+    if (!byId.has(e.from) || !byId.has(e.to)) continue;
+    // Dagre is a DAG layouter; a back edge would throw off ranking, so keep
+    // only the first direction seen for any pair.
+    const key = `${e.from}->${e.to}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    g.setEdge(e.from, e.to, { width: e.label ? textWidth(e.label, 11) + 12 : 0, height: e.label ? 16 : 0 }, e.id);
+  }
+
+  dagre.layout(g);
+
+  for (const m of measured) {
+    const pos = g.node(m.id);
+    if (!pos) continue;
+    m.x = pos.x - m.w / 2;
+    m.y = pos.y - m.h / 2;
+  }
+
+  const laidOutEdges: LaidOutEdge[] = [];
+  for (const e of graph.edges) {
+    const a = byId.get(e.from);
+    const b = byId.get(e.to);
+    if (!a || !b) continue;
+    const points = anchorPoints(a, b, vertical, theme.layout.arrow);
+    // The label belongs on the run the elbow actually travels, offset off the
+    // stroke so it never sits on top of a neighbouring edge.
+    const mid = vertical
+      ? { x: points[1].x, y: (points[0].y + points[1].y) / 2 + theme.layout.edgeRadius }
+      : { x: (points[0].x + points[1].x) / 2 + theme.layout.edgeRadius, y: points[1].y };
+    laidOutEdges.push({
+      id: e.id,
+      from: e.from,
+      to: e.to,
+      label: e.label,
+      dashed: e.dashed,
+      path: orthogonalPath(points, theme.layout.edgeRadius, vertical),
+      labelPos: e.label ? mid : undefined,
+    });
+  }
+
+  const laidOutClusters: LaidOutCluster[] = [];
+  const groups = new Map<string, LaidOutNode[]>();
+  for (const m of measured) {
+    if (!m.node.group) continue;
+    const list = groups.get(m.node.group) ?? [];
+    list.push(m);
+    groups.set(m.node.group, list);
+  }
+  for (const [name, members] of groups) {
+    const x = Math.min(...members.map((m) => m.x)) - CLUSTER_PAD;
+    const y = Math.min(...members.map((m) => m.y)) - CLUSTER_PAD - CLUSTER_HEAD;
+    const right = Math.max(...members.map((m) => m.x + m.w)) + CLUSTER_PAD;
+    const bottom = Math.max(...members.map((m) => m.y + m.h)) + CLUSTER_PAD;
+    laidOutClusters.push({ name, x, y, w: right - x, h: bottom - y });
+  }
+
+  const all = [
+    ...measured.map((m) => ({ x1: m.x, y1: m.y, x2: m.x + m.w, y2: m.y + m.h })),
+    ...laidOutClusters.map((c) => ({ x1: c.x, y1: c.y, x2: c.x + c.w, y2: c.y + c.h })),
+  ];
+  const pad = 28;
+  const width = all.length ? Math.max(...all.map((b) => b.x2)) + pad : 0;
+  const height = all.length ? Math.max(...all.map((b) => b.y2)) + pad : 0;
+
+  return { nodes: measured, edges: laidOutEdges, clusters: laidOutClusters, width, height };
+}
+
+/**
+ * Edges leave and enter on the face pointing at the other card. When the two
+ * cards barely overlap on the cross axis, the exit slides along the face toward
+ * the target so the elbow stays short instead of doubling back.
+ */
+function anchorPoints(
+  a: LaidOutNode,
+  b: LaidOutNode,
+  vertical: boolean,
+  arrow: number,
+): { x: number; y: number }[] {
+  const ac = { x: a.x + a.w / 2, y: a.y + a.h / 2 };
+  const bc = { x: b.x + b.w / 2, y: b.y + b.h / 2 };
+
+  if (vertical) {
+    const down = bc.y >= ac.y;
+    // Keep the exit inside the card's own width, biased toward the target.
+    const inset = Math.min(a.w / 2 - 12, Math.abs(bc.x - ac.x) / 2);
+    const exitX = ac.x + Math.sign(bc.x - ac.x) * Math.max(0, inset);
+    return [
+      { x: exitX, y: down ? a.y + a.h : a.y },
+      { x: bc.x, y: down ? b.y - arrow : b.y + b.h + arrow },
+    ];
+  }
+
+  const right = bc.x >= ac.x;
+  const inset = Math.min(a.h / 2 - 10, Math.abs(bc.y - ac.y) / 2);
+  const exitY = ac.y + Math.sign(bc.y - ac.y) * Math.max(0, inset);
+  return [
+    { x: right ? a.x + a.w : a.x, y: exitY },
+    { x: right ? b.x - arrow : b.x + b.w + arrow, y: bc.y },
+  ];
+}

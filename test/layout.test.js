@@ -1,0 +1,205 @@
+import assert from "node:assert/strict";
+import test from "node:test";
+import dagre from "@dagrejs/dagre";
+import { layoutGraph, measureNode, textWidth, wrap } from "../dist/layout.js";
+import { DEFAULT_THEME } from "../dist/theme.js";
+
+const node = (over = {}) => ({
+  id: "n1",
+  title: "A node",
+  kind: "action",
+  state: "planned",
+  bullets: [],
+  figures: [],
+  createdAt: 1,
+  updatedAt: 1,
+  ...over,
+});
+
+const graph = (nodes, edges = []) => ({
+  chartId: "t",
+  title: "T",
+  direction: "TD",
+  nodes,
+  edges,
+  events: [],
+  revision: 1,
+  createdAt: 1,
+  updatedAt: 1,
+});
+
+test("textWidth grows with length and font size", () => {
+  assert.ok(textWidth("aa", 12) > textWidth("a", 12));
+  assert.ok(textWidth("abc", 20) > textWidth("abc", 12));
+  assert.equal(textWidth("", 12), 0);
+});
+
+test("narrow glyphs measure narrower than wide ones", () => {
+  assert.ok(textWidth("iiii", 12) < textWidth("mmmm", 12));
+});
+
+test("wrap keeps every line inside the max width", () => {
+  const words = "the quick brown fox jumps over the lazy dog near the river bank";
+  const lines = wrap(words, 12, 120);
+  assert.ok(lines.length > 1);
+  for (const l of lines) assert.ok(textWidth(l, 12) <= 120, `too wide: ${l}`);
+  assert.equal(lines.join(" "), words);
+});
+
+test("wrap never drops a word that alone exceeds the width", () => {
+  const lines = wrap("supercalifragilisticexpialidocious", 12, 20);
+  assert.equal(lines.length, 1);
+  assert.match(lines[0], /^supercalifragilistic/);
+});
+
+test("a card is at least the theme's minimum height", () => {
+  const m = measureNode(node(), DEFAULT_THEME, false);
+  assert.ok(m.h >= DEFAULT_THEME.card.minHeight);
+  assert.equal(m.w, DEFAULT_THEME.card.width);
+});
+
+test("more bullets make a taller card", () => {
+  const few = measureNode(node({ bullets: ["one"] }), DEFAULT_THEME, false);
+  const many = measureNode(
+    node({ bullets: ["one", "two", "three", "four", "five"] }),
+    DEFAULT_THEME,
+    false,
+  );
+  assert.ok(many.h > few.h);
+});
+
+test("bullets past the cap are counted, not rendered", () => {
+  const bullets = Array.from({ length: 20 }, (_, i) => `bullet number ${i}`);
+  const m = measureNode(node({ bullets }), DEFAULT_THEME, false);
+  assert.ok(m.bulletLines.length <= 8);
+  assert.ok(m.hiddenBullets > 0);
+});
+
+test("a long title truncates rather than growing unbounded", () => {
+  const m = measureNode(
+    node({ title: "word ".repeat(80).trim() }),
+    DEFAULT_THEME,
+    false,
+  );
+  assert.ok(m.titleLines.length <= 3);
+  assert.match(m.titleLines.at(-1), /…$/);
+});
+
+test("showing a figure reserves a box and grows the card", () => {
+  const withFig = node({ figures: [{ id: "f", file: "a.png", mime: "image/png" }] });
+  const off = measureNode(withFig, DEFAULT_THEME, false);
+  const on = measureNode(withFig, DEFAULT_THEME, true);
+  assert.equal(off.figure, undefined);
+  assert.ok(on.figure);
+  assert.ok(on.h > off.h);
+  assert.ok(on.figure.y + on.figure.h <= on.h, "figure must stay inside the card");
+});
+
+test("layout places nodes without overlapping", () => {
+  const nodes = [
+    node({ id: "a", title: "First" }),
+    node({ id: "b", title: "Second" }),
+    node({ id: "c", title: "Third" }),
+  ];
+  const edges = [
+    { id: "e1", from: "a", to: "b", dashed: false },
+    { id: "e2", from: "a", to: "c", dashed: false },
+  ];
+  const out = layoutGraph(graph(nodes, edges), DEFAULT_THEME, dagre, false);
+  assert.equal(out.nodes.length, 3);
+  assert.equal(out.edges.length, 2);
+  for (let i = 0; i < out.nodes.length; i++) {
+    for (let j = i + 1; j < out.nodes.length; j++) {
+      const p = out.nodes[i];
+      const q = out.nodes[j];
+      const disjoint =
+        p.x + p.w <= q.x || q.x + q.w <= p.x || p.y + p.h <= q.y || q.y + q.h <= p.y;
+      assert.ok(disjoint, `${p.id} overlaps ${q.id}`);
+    }
+  }
+});
+
+test("every node fits inside the reported canvas", () => {
+  const nodes = ["a", "b", "c", "d"].map((id) => node({ id, title: id }));
+  const edges = [
+    { id: "e1", from: "a", to: "b", dashed: false },
+    { id: "e2", from: "b", to: "c", dashed: false },
+    { id: "e3", from: "b", to: "d", dashed: false },
+  ];
+  const out = layoutGraph(graph(nodes, edges), DEFAULT_THEME, dagre, false);
+  for (const n of out.nodes) {
+    assert.ok(n.x >= 0 && n.y >= 0, `${n.id} outside origin`);
+    assert.ok(n.x + n.w <= out.width, `${n.id} exceeds width`);
+    assert.ok(n.y + n.h <= out.height, `${n.id} exceeds height`);
+  }
+});
+
+test("edges produce a drawable path", () => {
+  const nodes = [node({ id: "a" }), node({ id: "b" })];
+  const out = layoutGraph(
+    graph(nodes, [{ id: "e", from: "a", to: "b", dashed: false }]),
+    DEFAULT_THEME,
+    dagre,
+    false,
+  );
+  assert.match(out.edges[0].path, /^M[\d.]+,[\d.]+/);
+  assert.ok(!out.edges[0].path.includes("NaN"));
+});
+
+test("an edge to a missing node is dropped, not crashed on", () => {
+  const out = layoutGraph(
+    graph([node({ id: "a" })], [{ id: "e", from: "a", to: "ghost", dashed: false }]),
+    DEFAULT_THEME,
+    dagre,
+    false,
+  );
+  assert.equal(out.edges.length, 0);
+  assert.equal(out.nodes.length, 1);
+});
+
+test("groups become clusters that contain their members", () => {
+  const nodes = [
+    node({ id: "a", group: "Caching" }),
+    node({ id: "b", group: "Caching" }),
+    node({ id: "c" }),
+  ];
+  const out = layoutGraph(graph(nodes, []), DEFAULT_THEME, dagre, false);
+  assert.equal(out.clusters.length, 1);
+  const c = out.clusters[0];
+  assert.equal(c.name, "Caching");
+  for (const id of ["a", "b"]) {
+    const m = out.nodes.find((n) => n.id === id);
+    assert.ok(m.x >= c.x && m.x + m.w <= c.x + c.w, `${id} escapes cluster x`);
+    assert.ok(m.y >= c.y && m.y + m.h <= c.y + c.h, `${id} escapes cluster y`);
+  }
+});
+
+test("an empty graph lays out to nothing without throwing", () => {
+  const out = layoutGraph(graph([], []), DEFAULT_THEME, dagre, false);
+  assert.equal(out.nodes.length, 0);
+  assert.equal(out.width, 0);
+  assert.equal(out.height, 0);
+});
+
+test("a cycle still lays out", () => {
+  const nodes = [node({ id: "a" }), node({ id: "b" })];
+  const edges = [
+    { id: "e1", from: "a", to: "b", dashed: false },
+    { id: "e2", from: "b", to: "a", dashed: false },
+  ];
+  const out = layoutGraph(graph(nodes, edges), DEFAULT_THEME, dagre, false);
+  assert.equal(out.nodes.length, 2);
+  for (const e of out.edges) assert.ok(!e.path.includes("NaN"));
+});
+
+test("LR direction lays out wider than tall", () => {
+  const nodes = ["a", "b", "c"].map((id) => node({ id, title: id }));
+  const edges = [
+    { id: "e1", from: "a", to: "b", dashed: false },
+    { id: "e2", from: "b", to: "c", dashed: false },
+  ];
+  const td = layoutGraph({ ...graph(nodes, edges), direction: "TD" }, DEFAULT_THEME, dagre, false);
+  const lr = layoutGraph({ ...graph(nodes, edges), direction: "LR" }, DEFAULT_THEME, dagre, false);
+  assert.ok(lr.width > td.width);
+  assert.ok(td.height > lr.height);
+});
