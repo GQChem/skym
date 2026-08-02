@@ -188,9 +188,12 @@ export function renderSvg(layout: LayoutResult, o: RenderOptions): string {
     `<svg xmlns="http://www.w3.org/2000/svg" class="skym-svg" width="${w.toFixed(0)}" height="${h.toFixed(0)}" ` +
       `viewBox="0 0 ${w.toFixed(0)} ${h.toFixed(0)}" font-family="${esc(theme.type.family)}">`,
     `<defs>`,
-    `<marker id="skym-arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="${theme.layout.arrow}" ` +
-      `markerHeight="${theme.layout.arrow}" orient="auto-start-reverse">` +
-      `<path d="M0,1.5 L9,5 L0,8.5 z" fill="${palette.edge}"/></marker>`,
+    // markerUnits=userSpaceOnUse keeps the head a fixed size instead of scaling
+    // with stroke width, and the slight concave back stops it reading as a blob.
+    `<marker id="skym-arrow" viewBox="0 0 12 12" refX="10.5" refY="6" ` +
+      `markerWidth="${theme.layout.arrow * 1.5}" markerHeight="${theme.layout.arrow * 1.5}" ` +
+      `markerUnits="userSpaceOnUse" orient="auto-start-reverse">` +
+      `<path d="M1,1.4 L11,6 L1,10.6 L2.9,6 Z" fill="${palette.edge}"/></marker>`,
     `</defs>`,
     clusterMarkup(layout, o),
     edgeMarkup(layout, o),

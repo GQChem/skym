@@ -195,3 +195,53 @@ test("readChart reaches another chat's chart", () => {
   assert.equal(b.readChart("other").nodes.length, 1);
   assert.equal(b.readChart("does-not-exist"), null);
 });
+
+test("a lock whose pid was recycled does not strand the chart", () => {
+  const root = tmp();
+  const a = mk(root);
+  a.init("Recycled pid");
+  a.upsertNode({ id: "n", title: "Existing work" });
+  const dir = a.chartDir;
+
+  // The holder dies without releasing, and the OS later hands its pid to an
+  // unrelated live process — here, this very test runner. The giveaway is that
+  // nothing has kept the lock warm since.
+  const lock = path.join(dir, ".lock");
+  const stolen = fs.readFileSync(lock, "utf8").split(":");
+  fs.writeFileSync(lock, `${process.pid}:${stolen[1]}:someone-else`, "utf8");
+  const cold = new Date(Date.now() - 10 * 60 * 1000);
+  fs.utimesSync(lock, cold, cold);
+
+  const b = mk(root);
+  const out = b.init("Recycled pid");
+  assert.equal(out.resumed, true, "must resume rather than fork to -2");
+  assert.equal(b.chartId, a.chartId);
+  assert.equal(out.graph.nodes.length, 1);
+});
+
+test("a lock from an earlier boot is never treated as live", () => {
+  const root = tmp();
+  const a = mk(root);
+  a.init("Old boot");
+  a.upsertNode({ id: "n", title: "Work" });
+
+  const lock = path.join(a.chartDir, ".lock");
+  // Same pid, but a boot id from before the machine last started.
+  fs.writeFileSync(lock, `${process.pid}:0:previous-boot`, "utf8");
+
+  const b = mk(root);
+  assert.equal(b.init("Old boot").resumed, true);
+  assert.equal(b.chartId, a.chartId);
+});
+
+test("a live lock still blocks a second chat", () => {
+  const root = tmp();
+  const a = mk(root);
+  a.init("Concurrent");
+  a.upsertNode({ id: "n", title: "Held" });
+
+  // a is still running and keeps its lock warm, so b must not join it.
+  const b = mk(root);
+  b.init("Concurrent");
+  assert.notEqual(b.chartId, a.chartId, "two chats must not share one chart");
+});

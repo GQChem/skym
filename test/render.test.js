@@ -162,14 +162,17 @@ test("theme overrides flow through to the output", () => {
     card: { width: 400 },
     light: { states: { planned: { accent: "#ff00ff" } } },
   });
-  const layout = layoutGraph(graph([node()]), custom, dagre, false);
+  // Long enough to reach the ceiling, since width is a maximum not a fixed size.
+  const long = node({ bullets: ["a bullet long enough that it needs most of the available card width"] });
+  const layout = layoutGraph(graph([long]), custom, dagre, false);
   const svg = renderSvg(layout, {
     theme: custom,
     palette: paletteFor(custom, "light"),
     figureSrc: (f) => f,
   });
   assert.ok(svg.includes("#ff00ff"), "palette override ignored");
-  assert.equal(layout.nodes[0].w, 400, "card width override ignored");
+  assert.ok(layout.nodes[0].w > DEFAULT_THEME.card.width, "raised ceiling was ignored");
+  assert.ok(layout.nodes[0].w <= 400, "card exceeded the raised ceiling");
 });
 
 test("overrides do not mutate the default theme", () => {

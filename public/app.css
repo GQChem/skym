@@ -324,23 +324,62 @@ code {
 .legend {
   display: flex;
   flex-direction: column;
-  gap: 5px;
+  gap: 14px;
   font-size: 12.5px;
+}
+
+.leg-kind {
+  display: flex;
+  align-items: baseline;
+  gap: 7px;
+  margin-bottom: 5px;
+  font-size: 11px;
+  font-weight: 650;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.leg-kind span {
+  font-weight: 400;
+  letter-spacing: 0;
+  text-transform: none;
+  color: var(--muted);
 }
 
 .leg {
   display: grid;
-  grid-template-columns: 12px 88px 1fr;
+  grid-template-columns: 20px 82px 1fr;
   align-items: center;
   gap: 8px;
+  padding: 1.5px 0;
 }
 
-/* Fill and border come from the renderer's palette, set inline. */
-.sw {
-  width: 12px;
-  height: 12px;
+/* A miniature of a real card: fill, border, stripe, and glyph. */
+.leg-chip {
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 20px;
+  height: 15px;
+  border: 1px solid;
   border-radius: 3px;
-  border: 2px solid;
+  overflow: hidden;
+}
+
+.leg-stripe {
+  position: absolute;
+  left: 0;
+  top: 0;
+  bottom: 0;
+  width: 2.5px;
+}
+
+.leg-glyph {
+  font-size: 9px;
+  font-weight: 700;
+  line-height: 1;
+  padding-left: 2px;
 }
 
 .note {

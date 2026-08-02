@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import dagre from "@dagrejs/dagre";
 import { layoutGraph, measureNode, textWidth, wrap } from "../dist/layout.js";
-import { DEFAULT_THEME } from "../dist/theme.js";
+import { DEFAULT_THEME, resolveTheme } from "../dist/theme.js";
 
 const node = (over = {}) => ({
   id: "n1",
@@ -55,7 +55,7 @@ test("wrap never drops a word that alone exceeds the width", () => {
 test("a card is at least the theme's minimum height", () => {
   const m = measureNode(node(), DEFAULT_THEME, false);
   assert.ok(m.h >= DEFAULT_THEME.card.minHeight);
-  assert.equal(m.w, DEFAULT_THEME.card.width);
+  assert.ok(m.w <= DEFAULT_THEME.card.width);
 });
 
 test("more bullets make a taller card", () => {
@@ -202,4 +202,46 @@ test("LR direction lays out wider than tall", () => {
   const lr = layoutGraph({ ...graph(nodes, edges), direction: "LR" }, DEFAULT_THEME, dagre, false);
   assert.ok(lr.width > td.width);
   assert.ok(td.height > lr.height);
+});
+
+test("card width is a ceiling: short content yields a narrower card", () => {
+  const wide = measureNode(node({ title: "Hi" }), DEFAULT_THEME, false);
+  assert.ok(wide.w < DEFAULT_THEME.card.width, "a two-letter title should not fill the ceiling");
+});
+
+test("long content grows up to the ceiling but never past it", () => {
+  const m = measureNode(
+    node({ bullets: ["a single bullet far too long to fit on any one line of this card"] }),
+    DEFAULT_THEME,
+    false,
+  );
+  // Wrapping breaks at words, so the longest line lands near — not exactly on —
+  // the ceiling. What matters is that it uses the space, and never exceeds it.
+  assert.ok(m.w <= DEFAULT_THEME.card.width, "must never exceed the ceiling");
+  assert.ok(m.w > DEFAULT_THEME.card.width * 0.9, "wrapped content should use the width");
+});
+
+test("lowering the ceiling makes cards narrower, not just taller", () => {
+  const bullets = ["Serve the compiled tsc output as native ESM modules the browser loads directly"];
+  const wide = measureNode(node({ bullets }), resolveTheme(DEFAULT_THEME, { card: { width: 420 } }), false);
+  const narrow = measureNode(node({ bullets }), resolveTheme(DEFAULT_THEME, { card: { width: 240 } }), false);
+  assert.ok(narrow.w < wide.w, "narrow ceiling must produce a narrower card");
+  assert.ok(narrow.h > wide.h, "and wrap more, so it is taller");
+});
+
+test("no card is ever wider than its content needs", () => {
+  for (const width of [200, 280, 360, 520]) {
+    const theme = resolveTheme(DEFAULT_THEME, { card: { width } });
+    const m = measureNode(node({ title: "Redis", bullets: ["Fast"] }), theme, false);
+    assert.ok(m.w <= width, `card exceeded ceiling ${width}`);
+    const slack = width - m.w;
+    assert.ok(slack >= 0);
+  }
+});
+
+test("a figure holds the card open at the ceiling", () => {
+  const withFig = node({ title: "x", figures: [{ id: "f", file: "a.png", mime: "image/png" }] });
+  const m = measureNode(withFig, DEFAULT_THEME, true);
+  assert.equal(m.w, DEFAULT_THEME.card.width, "figures should use the full width");
+  assert.equal(m.figure.w, m.w - DEFAULT_THEME.card.padX * 2 - DEFAULT_THEME.card.stripe);
 });

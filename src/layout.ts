@@ -48,25 +48,32 @@ export interface LayoutResult {
 }
 
 /**
- * Average glyph widths as a fraction of font size, sampled from the UI sans at
- * the sizes we render. Cheap, deterministic, and identical on server and client
- * — a canvas measure would differ between the two and desync the offline file.
+ * Average glyph widths as a fraction of font size. Cheap, deterministic, and
+ * identical on server and client — a canvas measure would differ between the
+ * two and desync the offline file.
+ *
+ * Calibrated against canvas measureText for the UI sans at the sizes we render
+ * (see scripts/calibrate-text.mjs). Estimating high is not a safe default: it
+ * wraps text that would have fit and stops cards from reaching their ceiling.
  */
-const NARROW = new Set("ijltfIr!.,;:'\"|()[]{}/\\`-");
+// Two tiers: "i" and "l" really are hairline, but t/f/r sit nearer half width.
+const HAIRLINE = new Set("ilI!.,;:'|`");
+const NARROW = new Set("jtfr()[]{}/\\-\"");
 const WIDE = new Set("mwMW@%");
 
 export function textWidth(text: string, size: number, weight = 400): number {
   let units = 0;
   for (const ch of text) {
-    if (NARROW.has(ch)) units += 0.32;
-    else if (WIDE.has(ch)) units += 0.92;
-    else if (ch === " ") units += 0.27;
-    else if (ch >= "A" && ch <= "Z") units += 0.66;
-    else if (ch >= "0" && ch <= "9") units += 0.56;
-    else units += 0.53;
+    if (HAIRLINE.has(ch)) units += 0.2;
+    else if (NARROW.has(ch)) units += 0.465;
+    else if (WIDE.has(ch)) units += 0.861;
+    else if (ch === " ") units += 0.274;
+    else if (ch >= "A" && ch <= "Z") units += 0.6125;
+    else if (ch >= "0" && ch <= "9") units += 0.539;
+    else units += 0.49;
   }
   // Semibold text sets slightly wider than regular at the same size.
-  const weighting = weight >= 600 ? 1.045 : 1;
+  const weighting = weight >= 600 ? 1.03 : 1;
   return units * size * weighting;
 }
 
@@ -91,6 +98,12 @@ export function wrap(text: string, size: number, maxWidth: number, weight = 400)
 const MAX_TITLE_LINES = 3;
 const MAX_BULLET_LINES = 8;
 
+/** Bullets hang from a marker, so wrapped lines indent to clear it. */
+const MARKER_INDENT = 11;
+
+/** Mirrors the renderer's meta row so measurement matches what is drawn. */
+const KIND_TEXT: Record<string, string> = { action: "ACTION", result: "RESULT", options: "DECISION" };
+
 /** Always ends in an ellipsis: the caller uses it to signal dropped text. */
 function truncateToWidth(text: string, size: number, maxWidth: number, weight = 400): string {
   let out = text;
@@ -100,10 +113,17 @@ function truncateToWidth(text: string, size: number, maxWidth: number, weight = 
   return `${out.trimEnd()}…`;
 }
 
-/** Measures a card so dagre can lay out real boxes rather than guesses. */
+/**
+ * Measures a card so dagre can lay out real boxes rather than guesses.
+ *
+ * `card.width` is a ceiling, not a fixed size: text wraps at it, then the card
+ * shrinks back to whatever the longest line actually needs. A narrow setting
+ * therefore yields compact cards rather than tall ones padded with dead space.
+ */
 export function measureNode(node: FlowNode, theme: Theme, showFigures: boolean): LaidOutNode {
   const { card, type } = theme;
-  const inner = card.width - card.padX * 2 - card.stripe;
+  const chrome = card.padX * 2 + card.stripe;
+  const inner = card.width - chrome;
 
   const rawTitle = wrap(node.title, type.titleSize, inner, type.titleWeight);
   const titleLines = rawTitle.slice(0, MAX_TITLE_LINES);
@@ -116,8 +136,6 @@ export function measureNode(node: FlowNode, theme: Theme, showFigures: boolean):
     );
   }
 
-  // Bullets hang from a marker, so wrapped lines indent to clear it.
-  const markerIndent = 11;
   const bulletLines: Line[] = [];
   let hiddenBullets = 0;
   for (const bullet of node.bullets) {
@@ -125,7 +143,7 @@ export function measureNode(node: FlowNode, theme: Theme, showFigures: boolean):
       hiddenBullets++;
       continue;
     }
-    const wrapped = wrap(bullet, type.bulletSize, inner - markerIndent);
+    const wrapped = wrap(bullet, type.bulletSize, inner - MARKER_INDENT);
     for (let i = 0; i < wrapped.length; i++) {
       if (bulletLines.length >= MAX_BULLET_LINES) break;
       bulletLines.push({ text: wrapped[i], first: i === 0 });
@@ -136,10 +154,24 @@ export function measureNode(node: FlowNode, theme: Theme, showFigures: boolean):
   const titleH = titleLines.length * type.titleLeading;
   const bulletsH = bulletLines.length ? card.gap + bulletLines.length * type.bulletLeading : 0;
 
+  // Widest real line, so the card can give back space nothing is using. The
+  // meta row is included — it is often the widest thing on a short card.
+  const metaW =
+    type.metaSize + 5 + textWidth(`${KIND_TEXT[node.kind] ?? node.kind.toUpperCase()} · ${node.state.toUpperCase()}`, type.metaSize, type.metaWeight);
+  const contentW = Math.max(
+    metaW,
+    ...titleLines.map((t) => textWidth(t, type.titleSize, type.titleWeight)),
+    ...bulletLines.map((b) => MARKER_INDENT + textWidth(b.text, type.bulletSize)),
+    // A figure is laid out against the ceiling, so it pins the card open.
+    showFigures && node.figures.length ? inner : 0,
+  );
+  const width = Math.min(card.width, Math.ceil(contentW) + chrome);
+  const innerFinal = width - chrome;
+
   let figure: LaidOutNode["figure"];
   let figureH = 0;
   if (showFigures && node.figures.length) {
-    const w = inner;
+    const w = innerFinal;
     const h = Math.round(w * card.figureRatio);
     figureH = card.gap + h;
     figure = { x: card.stripe + card.padX, y: 0, w, h };
@@ -161,7 +193,7 @@ export function measureNode(node: FlowNode, theme: Theme, showFigures: boolean):
     node,
     x: 0,
     y: 0,
-    w: card.width,
+    w: width,
     h,
     titleLines,
     bulletLines,

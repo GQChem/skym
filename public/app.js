@@ -1,7 +1,7 @@
 import dagre from "./vendor/dagre.js";
 import { layoutGraph } from "./vendor/layout.js";
 import { renderSvg } from "./vendor/render.js";
-import { DEFAULT_THEME, paletteFor, resolveTheme } from "./vendor/theme.js";
+import { DEFAULT_THEME, KIND_LABEL, STATE_GLYPH, paletteFor, resolveTheme } from "./vendor/theme.js";
 
 const $ = (id) => document.getElementById(id);
 const canvas = $("canvas");
@@ -191,31 +191,63 @@ const renderEvents = () => {
     .join("");
 };
 
-const STATES = [
-  ["action", "planned", "candidate step"],
-  ["action", "exploring", "working now"],
-  ["action", "waiting", "blocked on a wait"],
-  ["action", "done", "finished"],
-  ["action", "abandoned", "dead end"],
-  ["action", "blocked", "stuck"],
-  ["result", "good", "it worked"],
-  ["result", "bad", "it did not"],
-  ["result", "mixed", "tradeoffs"],
-  ["result", "inconclusive", "needs more"],
-  ["options", "open", "undecided fork"],
-  ["options", "resolved", "decided"],
+// Grouped by kind: the vocabulary is three kinds each with its own states, and
+// a flat list of twelve hides that structure.
+const LEGEND_GROUPS = [
+  {
+    kind: "action",
+    blurb: "something done or to be done",
+    states: [
+      ["planned", "not started"],
+      ["exploring", "working now"],
+      ["waiting", "blocked on a wait"],
+      ["done", "finished"],
+      ["blocked", "stuck"],
+      ["abandoned", "dead end"],
+    ],
+  },
+  {
+    kind: "result",
+    blurb: "what an action produced",
+    states: [
+      ["good", "it worked"],
+      ["bad", "it did not"],
+      ["mixed", "tradeoffs"],
+      ["inconclusive", "needs more"],
+    ],
+  },
+  {
+    kind: "options",
+    blurb: "a fork in the work",
+    states: [
+      ["open", "undecided"],
+      ["resolved", "decided"],
+    ],
+  },
 ];
 
 const renderLegend = () => {
   const palette = paletteFor(theme, mode);
-  $("legend").innerHTML = STATES.map(([kind, st, what]) => {
-    const ink = palette.states[st];
-    // The accent is the swatch: a card-fill wash is too faint at 12px.
-    return (
-      `<div class="leg"><span class="sw" style="background:${ink.accent};border-color:${ink.accent}"></span>` +
-      `<b>${st}</b><span class="muted">${kind} · ${what}</span></div>`
-    );
-  }).join("");
+  $("legend").innerHTML = LEGEND_GROUPS.map(
+    (g) =>
+      `<div class="leg-group">` +
+      `<div class="leg-kind">${escapeHtml(KIND_LABEL[g.kind] ?? g.kind)}<span>${escapeHtml(g.blurb)}</span></div>` +
+      g.states
+        .map(([st, what]) => {
+          const ink = palette.states[st];
+          // A miniature of the real card, so the legend teaches the chart.
+          return (
+            `<div class="leg" data-state="${st}">` +
+            `<span class="leg-chip" style="background:${ink.fill};border-color:${ink.border}">` +
+            `<span class="leg-stripe" style="background:${ink.accent}"></span>` +
+            `<span class="leg-glyph" style="color:${ink.accent}">${escapeHtml(STATE_GLYPH[st] ?? "•")}</span>` +
+            `</span>` +
+            `<b>${escapeHtml(st)}</b><span class="muted">${escapeHtml(what)}</span></div>`
+          );
+        })
+        .join("") +
+      `</div>`,
+  ).join("");
 };
 
 // --- node action menu ---

@@ -1,5 +1,6 @@
 import { randomUUID } from "node:crypto";
 import fs from "node:fs";
+import os from "node:os";
 import path from "node:path";
 import { writeOfflineHtml } from "./offline.js";
 
@@ -78,6 +79,27 @@ export interface Graph {
 
 const MAX_EVENTS = 300;
 
+/**
+ * A lock untouched for this long is treated as abandoned. A live server
+ * refreshes it on every commit and on a timer, so the window only has to
+ * outlast an idle gap between tool calls — not a whole session.
+ */
+const LOCK_STALE_MS = 90_000;
+
+/** How often a live holder proves it is still there. */
+const LOCK_HEARTBEAT_MS = 20_000;
+
+/**
+ * Identifies this boot, so a lock written before the last restart is never
+ * mistaken for a live one when the OS recycles its pid. Rounded to the minute
+ * and computed once, since uptime drifts by a second between calls.
+ */
+const BOOT_ID = String(Math.floor((Date.now() / 1000 - os.uptime()) / 60));
+
+function bootId(): string {
+  return BOOT_ID;
+}
+
 function emptyGraph(chartId: string, title: string): Graph {
   const now = Date.now();
   return {
@@ -114,8 +136,14 @@ export class GraphStore {
   root: string;
   /** Doubles as the chart's directory name; re-slugged from the title on init. */
   chartId: string;
-  /** Lock owner token, unique per store instance rather than per process. */
-  private readonly owner = `${process.pid}:${randomUUID().slice(0, 8)}`;
+  /**
+   * Lock owner token, unique per store instance rather than per process. The
+   * start time disambiguates a recycled pid: the OS reuses pid numbers, so
+   * "some process has this pid" is not "the process that wrote this is alive".
+   */
+  private readonly owner = `${process.pid}:${bootId()}:${randomUUID().slice(0, 8)}`;
+
+  private heartbeat: ReturnType<typeof setInterval> | null = null;
 
   constructor(root: string, chartId: string, title: string) {
     this.root = root;
@@ -127,6 +155,10 @@ export class GraphStore {
 
   /** Advisory lock released on shutdown so the chart can be resumed later. */
   release(): void {
+    if (this.heartbeat) {
+      clearInterval(this.heartbeat);
+      this.heartbeat = null;
+    }
     try {
       fs.rmSync(this.lockPath(this.chartId), { force: true });
     } catch {
@@ -231,6 +263,7 @@ export class GraphStore {
       this.graph.events = this.graph.events.slice(-MAX_EVENTS);
     }
     this.persist();
+    this.touchLock();
     for (const fn of this.listeners) {
       try {
         fn(this.graph);
@@ -263,6 +296,7 @@ export class GraphStore {
 
     this.chartId = target;
     fs.mkdirSync(this.assetsDir, { recursive: true });
+    this.startHeartbeat();
 
     if (existing) {
       this.graph = existing;
@@ -375,16 +409,61 @@ export class GraphStore {
     return path.join(this.root, "charts", chartId, ".lock");
   }
 
+  /**
+   * A live holder touches its lock on every commit. A lock that has not been
+   * touched in far longer than that belongs to a process that died without
+   * releasing it, whatever pid it claims.
+   */
+  private lockIsFresh(chartId: string): boolean {
+    try {
+      const age = Date.now() - fs.statSync(this.lockPath(chartId)).mtimeMs;
+      return age < LOCK_STALE_MS;
+    } catch {
+      return false;
+    }
+  }
+
+  /** Keeps this store's own lock warm so others can tell it is still alive. */
+  private touchLock(): void {
+    try {
+      const now = new Date();
+      fs.utimesSync(this.lockPath(this.chartId), now, now);
+    } catch {
+      // The lock may not exist yet during init; nothing to keep warm.
+    }
+  }
+
+  /**
+   * An idle session is still a live one, so the lock is refreshed on a timer
+   * as well as on commit. Unref'd: this must never hold the process open.
+   */
+  private startHeartbeat(): void {
+    if (this.heartbeat) return;
+    this.heartbeat = setInterval(() => this.touchLock(), LOCK_HEARTBEAT_MS);
+    this.heartbeat.unref?.();
+  }
+
   private isLocked(chartId: string): boolean {
     try {
       const raw = fs.readFileSync(this.lockPath(chartId), "utf8").trim();
-      // Owner is "<pid>:<store>" so sibling stores in one process still see
-      // each other's locks; only this exact store may re-adopt its own.
+      // Owner is "<pid>:<boot>:<store>" so sibling stores in one process still
+      // see each other's locks; only this exact store may re-adopt its own.
       if (raw === this.owner) return false;
-      const pid = Number(raw.split(":")[0]);
+      const [pidPart, bootPart] = raw.split(":");
+      const pid = Number(pidPart);
       if (!pid) return false;
-      process.kill(pid, 0); // Throws if that process is gone.
-      return true;
+      try {
+        process.kill(pid, 0); // Throws if no process holds this pid.
+      } catch {
+        return false;
+      }
+      // A lock from an earlier boot cannot belong to a live process, whatever
+      // pid it claims.
+      if (bootPart && bootPart !== bootId()) return false;
+      // Same boot: the holder proves liveness by keeping the lock warm. A pid
+      // check alone is not enough — pids are recycled, and a recycled pid used
+      // to strand the chart, forking it to "-2" and losing the user's history.
+      return this.lockIsFresh(chartId);
     } catch {
       return false;
     }
