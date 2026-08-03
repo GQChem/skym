@@ -64,13 +64,17 @@ Three forms, picked by what the reader has to do: **bar** to compare magnitudes,
   charts/
     index.json                       ← every chart in the project
     speed-up-the-search-endpoint/
-      graph.json                     ← the chart itself
+      log.jsonl                      ← append-only history; the source of truth
+      graph.json                     ← versioned snapshot of the fold
       flow.html                      ← self-contained offline viewer
       assets/                        ← figures
     debug-the-flaky-ci-runner/
+      log.jsonl
       graph.json
       flow.html
 ```
+
+Every mutation appends one operation to `log.jsonl`, and the chart is the fold of that log; `graph.json` caches the fold and carries a schema version. The log wins on read, so a crash between the append and the snapshot write costs nothing — replaying recovers it. Charts written before the log existed are read as-is and have their log reconstructed on first write, so no history is lost to the format change.
 
 Directories are named from the chart title, with a numeric suffix on collision. `graph.json` and `flow.html` are replaced atomically, so a crash mid-write cannot corrupt them.
 
