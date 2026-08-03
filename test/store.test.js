@@ -113,8 +113,9 @@ test("revision increments and events are recorded", () => {
   s.init("Rev Test");
   const before = s.get().revision;
   s.upsertNode({ id: "a" });
-  s.addEdge("a", "a");
-  assert.equal(s.get().revision, before + 2);
+  s.upsertNode({ id: "b" });
+  s.addEdge("a", "b");
+  assert.equal(s.get().revision, before + 3);
   assert.ok(s.get().events.some((e) => e.kind === "node.add"));
 });
 
@@ -246,4 +247,65 @@ test("a live lock still blocks a second chat", () => {
   const b = mk(root);
   b.init("Concurrent");
   assert.notEqual(b.chartId, a.chartId, "two chats must not share one chart");
+});
+
+test("a self-edge is rejected with a usable suggestion", () => {
+  const root = tmp();
+  const s = mk(root);
+  s.init("Self");
+  s.upsertNode({ id: "a" });
+  assert.throws(() => s.addEdge("a", "a"), /itself.*new node/s);
+  s.release();
+});
+
+test("an edge that would close a cycle is rejected and names the path", () => {
+  const root = tmp();
+  const s = mk(root);
+  s.init("Cycles");
+  for (const id of ["a", "b", "c"]) s.upsertNode({ id });
+  s.addEdge("a", "b");
+  s.addEdge("b", "c");
+
+  assert.throws(() => s.addEdge("c", "a"), /cycle: a → b → c → a/);
+  // The chart is unchanged: a rejected edge must not half-apply.
+  assert.equal(s.get().edges.length, 2);
+  s.release();
+});
+
+test("a diamond is not a cycle", () => {
+  const root = tmp();
+  const s = mk(root);
+  s.init("Diamond");
+  for (const id of ["a", "b", "c", "d"]) s.upsertNode({ id });
+  s.addEdge("a", "b");
+  s.addEdge("a", "c");
+  s.addEdge("b", "d");
+  assert.doesNotThrow(() => s.addEdge("c", "d"), "two routes to one node is normal");
+  assert.equal(s.get().edges.length, 4);
+  s.release();
+});
+
+test("re-adding an existing edge still works", () => {
+  const root = tmp();
+  const s = mk(root);
+  s.init("Redundant");
+  s.upsertNode({ id: "a" });
+  s.upsertNode({ id: "b" });
+  s.addEdge("a", "b");
+  assert.doesNotThrow(() => s.addEdge("a", "b", undefined, true), "updating an edge is not a cycle");
+  assert.equal(s.get().edges.length, 1);
+  s.release();
+});
+
+test("the node ceiling rejects new nodes but still allows updates", () => {
+  const root = tmp();
+  const s = mk(root);
+  s.init("Full");
+  for (let i = 0; i < 300; i++) s.upsertNode({ id: `n${i}` });
+
+  assert.throws(() => s.upsertNode({ id: "one-too-many" }), /Summarise|new chart/);
+  // A full chart must still be correctable.
+  assert.doesNotThrow(() => s.upsertNode({ id: "n0", title: "Renamed" }));
+  assert.equal(s.get().nodes.find((n) => n.id === "n0").title, "Renamed");
+  s.release();
 });

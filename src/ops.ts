@@ -80,6 +80,7 @@ const DEFAULT_STATE: Record<NodeKind, NodeState> = {
   action: "planned",
   result: "inconclusive",
   options: "open",
+  note: "active",
 };
 
 export function emptyGraph(chartId: string, title: string, at = Date.now()): Graph {

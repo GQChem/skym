@@ -250,6 +250,14 @@ const LEGEND_GROUPS = [
       ["resolved", "decided"],
     ],
   },
+  {
+    kind: "note",
+    blurb: "context, not a step",
+    states: [
+      ["active", "still true"],
+      ["retired", "no longer applies"],
+    ],
+  },
 ];
 
 const renderLegend = () => {

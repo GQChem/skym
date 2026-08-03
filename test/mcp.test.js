@@ -35,8 +35,9 @@ test("exposes the expected tool surface", async () => {
   try {
     const names = (await s.client.listTools()).tools.map((t) => t.name).sort();
     assert.deepEqual(names, [
-      "flow_action", "flow_chart", "flow_edge", "flow_figure", "flow_init",
-      "flow_options", "flow_remove", "flow_result", "flow_show", "flow_state",
+      "flow_action", "flow_chart", "flow_edge", "flow_figure", "flow_find",
+      "flow_init", "flow_note", "flow_options", "flow_remove", "flow_result",
+      "flow_show", "flow_state",
     ]);
   } finally {
     await s.client.close();
@@ -337,6 +338,79 @@ test("flow_chart rejects data it cannot draw honestly", async () => {
       points: [{ label: "a", value: 1 }],
     });
     assert.ok(missing.isError, "unknown node must be rejected");
+  } finally {
+    await s.client.close();
+  }
+});
+
+test("flow_find locates nodes without dumping the chart", async () => {
+  const s = await boot();
+  try {
+    const call = (name, args) => s.client.callTool({ name, arguments: args });
+    await call("flow_init", { title: "Findable" });
+    await call("flow_action", { id: "redis", title: "Swap cache to Redis", state: "done", bullets: ["TTL 60s"] });
+    await call("flow_action", { id: "lru", title: "In-process LRU", state: "planned" });
+    await call("flow_result", { id: "bench", title: "p99 dropped", state: "good", after: "redis" });
+
+    const byText = text(await call("flow_find", { query: "redis" }));
+    assert.match(byText, /redis/);
+    assert.ok(!byText.includes("In-process LRU"), "must not return non-matches");
+
+    // Bullets are searched too, not just titles.
+    assert.match(text(await call("flow_find", { query: "ttl" })), /redis/i);
+
+    const open = text(await call("flow_find", { unresolved: true }));
+    assert.match(open, /lru/);
+    assert.ok(!open.includes("bench"), "a good result is not unresolved");
+
+    assert.match(text(await call("flow_find", { kind: "result" })), /bench/);
+    assert.match(text(await call("flow_find", { query: "nothing-matches-this" })), /No nodes matched/);
+  } finally {
+    await s.client.close();
+  }
+});
+
+test("flow_note records context as its own kind", async () => {
+  const s = await boot();
+  try {
+    const call = (name, args) => s.client.callTool({ name, arguments: args });
+    await call("flow_init", { title: "Notes" });
+    await call("flow_action", { id: "work", title: "Do the thing" });
+    const r = await call("flow_note", {
+      id: "budget",
+      title: "Must stay under 200ms p99",
+      bullets: ["Hard SLO"],
+      about: "work",
+    });
+    assert.ok(!r.isError, text(r));
+    assert.match(text(r), /1 active/);
+
+    // A note is a note, not an action wearing a misleading state.
+    const found = text(await call("flow_find", { kind: "note" }));
+    assert.match(found, /budget.*note\/active/);
+
+    // `about` links it to what it constrains.
+    assert.ok(text(await call("flow_show", {})).includes("n_budget -.-> n_work"));
+  } finally {
+    await s.client.close();
+  }
+});
+
+test("a cycle is rejected through the tools with the path named", async () => {
+  const s = await boot();
+  try {
+    const call = (name, args) => s.client.callTool({ name, arguments: args });
+    await call("flow_init", { title: "No loops" });
+    await call("flow_action", { id: "a" });
+    await call("flow_action", { id: "b", after: "a" });
+    await call("flow_action", { id: "c", after: "b" });
+
+    const loop = await call("flow_edge", { from: "c", to: "a" });
+    assert.ok(loop.isError, "closing a loop must be rejected");
+    assert.match(text(loop), /cycle: a → b → c → a/);
+
+    const self = await call("flow_edge", { from: "a", to: "a" });
+    assert.ok(self.isError, "a self-edge must be rejected");
   } finally {
     await s.client.close();
   }

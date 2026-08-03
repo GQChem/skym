@@ -284,7 +284,7 @@ server.registerTool(
     inputSchema: {
       id: z.string().describe("Node id."),
       state: z
-        .enum(["planned", "exploring", "waiting", "done", "abandoned", "blocked", "good", "bad", "mixed", "inconclusive", "open", "resolved"])
+        .enum(["planned", "exploring", "waiting", "done", "abandoned", "blocked", "good", "bad", "mixed", "inconclusive", "open", "resolved", "active", "retired"])
         .describe("Must be valid for that node's kind."),
     },
   },
@@ -375,6 +375,98 @@ server.registerTool(
           : `Figure attached to "${node_id}".`,
       ),
     );
+  },
+);
+
+server.registerTool(
+  "flow_find",
+  {
+    title: "Search this chat's chart",
+    description:
+      "Find nodes by text, kind, or state without dumping the whole chart. Use this when resuming a chart you did not build, to check what is still open, or to recover a node id before updating it. Returns ids you can pass straight to the other tools.",
+    inputSchema: {
+      query: z
+        .string()
+        .optional()
+        .describe("Case-insensitive text to match against ids, titles, and bullets."),
+      kind: z.enum(["action", "result", "options", "note"]).optional().describe("Only this kind."),
+      state: z
+        .enum([
+          "planned", "exploring", "waiting", "done", "abandoned", "blocked",
+          "good", "bad", "mixed", "inconclusive", "open", "resolved", "active", "retired",
+        ])
+        .optional()
+        .describe("Only this state. 'planned' finds unexplored branches; 'exploring' finds work left running."),
+      unresolved: z
+        .boolean()
+        .optional()
+        .describe("Only what still needs attention: planned, exploring, waiting, blocked, and open forks."),
+      limit: z.number().int().min(1).max(100).optional().describe("Cap the result count (default 25)."),
+    },
+  },
+  async ({ query, kind, state, unresolved, limit }) => {
+    const g = store.get();
+    const needle = query?.toLowerCase();
+    const OPEN: NodeState[] = ["planned", "exploring", "waiting", "blocked", "open"];
+
+    const hits = g.nodes.filter((n) => {
+      if (kind && n.kind !== kind) return false;
+      if (state && n.state !== state) return false;
+      if (unresolved && !OPEN.includes(n.state)) return false;
+      if (!needle) return true;
+      return (
+        n.id.toLowerCase().includes(needle) ||
+        n.title.toLowerCase().includes(needle) ||
+        n.bullets.some((b) => b.toLowerCase().includes(needle))
+      );
+    });
+
+    if (!hits.length) {
+      return ok(summary("No nodes matched.", "Try a broader query, or flow_show to see the whole chart."));
+    }
+
+    const shown = hits.slice(0, limit ?? 25);
+    const lines = shown.map((n) => {
+      const edges = g.edges.filter((e) => e.to === n.id).map((e) => e.from);
+      const after = edges.length ? ` ← ${edges.join(", ")}` : "";
+      const figures = n.figures.length ? ` [${n.figures.length} fig]` : "";
+      return `  ${n.id}  (${n.kind}/${n.state})${figures}  ${n.title}${after}`;
+    });
+    const more = hits.length > shown.length ? `\n  … ${hits.length - shown.length} more` : "";
+    return ok(summary(`${hits.length} match${hits.length === 1 ? "" : "es"}:\n${lines.join("\n")}${more}`));
+  },
+);
+
+server.registerTool(
+  "flow_note",
+  {
+    title: "Record standing context",
+    description:
+      "A constraint, fact, or open question that shapes the work without being a step in it — 'must stay under 200ms', 'the staging DB is a snapshot from March', 'unclear who owns this service'. Use when something matters but is not an action, result, or fork. Attach it to a node with `about:` when it constrains one branch.",
+    inputSchema: {
+      id: z.string().min(1).describe("Stable slug, e.g. 'latency-budget'."),
+      title: z.string().min(1).describe("The note itself, stated plainly."),
+      bullets: bulletsSchema.optional(),
+      state: z
+        .enum(["active", "retired"])
+        .optional()
+        .describe("active (default) = still true; retired = no longer applies, kept for the record."),
+      about: z
+        .string()
+        .optional()
+        .describe("Id of the node this constrains; draws a dashed edge from the note to it."),
+      group: z.string().optional().describe("Optional lane."),
+    },
+  },
+  async ({ id, title, bullets, state, about, group }) => {
+    validateBullets(bullets);
+    store.upsertNode({ id, title, kind: "note", state: assertState("note", state), bullets, group });
+    if (about) {
+      if (!store.findNode(about)) throw new Error(`Cannot attach a note to unknown node "${about}".`);
+      store.addEdge(id, about, undefined, true);
+    }
+    await ensureViewer();
+    return ok(summary(`Note "${id}" recorded.`));
   },
 );
 

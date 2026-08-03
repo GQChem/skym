@@ -95,6 +95,8 @@ const LIGHT_STATES: Record<NodeState, StateInk> = {
   inconclusive: { accent: "#6b7789", fill: "#f8f9fb", border: "#d5dbe4" },
   open: { accent: "#4a3aa7", fill: "#f6f5fd", border: "#c3bce8" },
   resolved: { accent: "#5d6f96", fill: "#f7f8fc", border: "#ccd5e6" },
+  active: { accent: "#6b7789", fill: "#fbfbfc", border: "#dfe3ea" },
+  retired: { accent: "#9aa3b2", fill: "#fafbfc", border: "#e6e9ee" },
 };
 
 const DARK_STATES: Record<NodeState, StateInk> = {
@@ -110,6 +112,8 @@ const DARK_STATES: Record<NodeState, StateInk> = {
   inconclusive: { accent: "#8b97ab", fill: "#1c2130", border: "#323a4a" },
   open: { accent: "#9085e9", fill: "#1d1b33", border: "#3a3560" },
   resolved: { accent: "#7d87a8", fill: "#1b1f2e", border: "#333a4c" },
+  active: { accent: "#8b97ab", fill: "#1b1f2b", border: "#333b49" },
+  retired: { accent: "#6b7484", fill: "#181c25", border: "#2a303b" },
 };
 
 export const DEFAULT_THEME: Theme = {
@@ -189,12 +193,15 @@ export const STATE_GLYPH: Record<NodeState, string> = {
   inconclusive: "?",
   open: "⋔",
   resolved: "◆",
+  active: "※",
+  retired: "·",
 };
 
 export const KIND_LABEL: Record<NodeKind, string> = {
   action: "Action",
   result: "Result",
   options: "Decision",
+  note: "Note",
 };
 
 export function paletteFor(theme: Theme, mode: "light" | "dark"): Palette {
