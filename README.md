@@ -18,17 +18,18 @@ Then copy `CLAUDE.md.example` into your project's `CLAUDE.md` — the tools do n
 
 ## The model
 
-Three node kinds, all rendered as rounded rectangles and distinguished by colour and border:
+Four node kinds, drawn as cards and distinguished by a state stripe, a glyph, and a written label — never by colour alone:
 
 | Kind | Meaning | States |
 | --- | --- | --- |
-| **action** | something done or to be done | `planned` `exploring` `done` `abandoned` `blocked` |
+| **action** | something done or to be done | `planned` `exploring` `waiting` `done` `abandoned` `blocked` |
 | **result** | what an action produced | `good` `bad` `mixed` `inconclusive` |
 | **options** | a fork with candidate branches | `open` `resolved` |
+| **note** | standing context, not a step | `active` `retired` |
 
 `flow_options` creates the branch point *and* one `planned` action per candidate, so alternatives you did not pursue stay on the chart instead of being forgotten.
 
-Node bodies are concise bullets. The server rejects prose-shaped bullets, rejects states that do not belong to a node's kind, rejects forks with fewer than two options, and nudges (without failing) when a result has no figure attached.
+Node bodies are concise bullets. The server rejects prose-shaped bullets, states that do not belong to a node's kind, forks with fewer than two options, self-edges, and edges that would close a cycle — an exploration reads as a tree, so a loop is almost always a mistake, and the error names the offending path. Charts are capped at 300 nodes and 900 edges, past which the honest fix is to summarise a branch or start a new chart. A result with no figure gets a nudge, not a failure.
 
 ## Tools
 
@@ -38,6 +39,8 @@ Node bodies are concise bullets. The server rejects prose-shaped bullets, reject
 | `flow_action` | Add/update an action. `after:` chains it to a previous node. |
 | `flow_result` | Add/update a result. Attach evidence with `flow_figure`. |
 | `flow_options` | Record a fork and seed its candidate branches. |
+| `flow_note` | Record a constraint, fact, or open question that shapes the work. |
+| `flow_find` | Search the chart by text, kind, or state — for resuming one you did not build. |
 | `flow_state` | Move a node to a new state as work progresses. |
 | `flow_edge` | Link nodes when the relation is not a simple follow-on. |
 | `flow_chart` | Draw a chart from data — no image generation, styled to match the cards. |
@@ -95,7 +98,7 @@ The shipped `.gitignore` commits `graph.json` but ignores `assets/` — charts s
 - **Figures** toggles embedded images on the cards; off, nodes just note the count. Either way the side panel shows them, and clicking any figure zooms it.
 - **Click a node** for its bullets and figures; **right-click** for its actions (work on it, copy id, copy node).
 - **Scroll** to zoom, **drag** to pan, **Fit** (or `f`) to re-centre. Pan/zoom survives live updates.
-- **Detail** follows the zoom: cards shed bullets, then figures, keeping only the headline when zoomed out — so a large chart stays readable as structure. Cards re-measure at each level, so the whole graph gets tighter rather than just clipping. Pin a level from the dropdown to override.
+- **Detail** follows the zoom: cards drop their bullets once text stops being legible, so a large chart reads as structure. Cards re-measure at each level, so the whole graph gets tighter rather than just clipping. Pin **Content** or **Titles** from the dropdown to override.
 - **Theme** toggles light/dark and persists — layout runs in the page, so it repaints without a round trip.
 - **SVG** exports the chart. **Legend** documents the state vocabulary; **Activity** lists recent revisions.
 
