@@ -17,10 +17,15 @@
         <span class="rev" id="rev"></span>
       </div>
       <div class="actions">
-        <label class="width-ctl" title="Node width">
+        <label class="width-ctl" title="Card width">
           <span aria-hidden="true">↔</span>
-          <input id="node-width" type="range" min="180" max="620" step="10" />
+          <input id="node-width" type="range" min="200" max="520" step="4" />
         </label>
+        <select id="detail-level" title="How much of each card to show">
+          <option value="auto">Detail: Auto</option>
+          <option value="full">Detail: Content</option>
+          <option value="compact">Detail: Titles</option>
+        </select>
         <button id="fit" title="Fit to screen">Fit</button>
         <button id="inline-figs" title="Show figures inline on the chart">Figures</button>
         <button id="theme" title="Toggle light/dark">Theme</button>
@@ -54,13 +59,12 @@
       </aside>
     </main>
 
-    <button id="workon" class="workon" hidden>⚙ Work on this</button>
+    <div id="node-menu" class="node-menu" hidden></div>
 
     <div id="lightbox" class="lightbox" hidden>
       <img id="lightbox-img" alt="" />
     </div>
 
-    <script src="/vendor/mermaid.min.js"></script>
-    <script src="/app.js"></script>
+    <script type="module" src="/app.js"></script>
   </body>
 </html>

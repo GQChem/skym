@@ -2,7 +2,7 @@ import http from "node:http";
 import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { toMermaid, type Theme } from "./mermaid.js";
+import { loadThemeConfig } from "./config.js";
 import type { GraphStore } from "./store.js";
 
 const here = path.dirname(fileURLToPath(import.meta.url));
@@ -20,13 +20,9 @@ const MIME: Record<string, string> = {
   ".webp": "image/webp",
 };
 
-function payload(store: GraphStore, theme: Theme): string {
-  const graph = store.get();
-  return JSON.stringify({ graph, mermaid: toMermaid(graph, theme) });
-}
-
-function themeOf(url: URL): Theme {
-  return url.searchParams.get("theme") === "dark" ? "dark" : "light";
+/** The viewer lays out and paints client-side, so this ships the graph only. */
+function payload(store: GraphStore): string {
+  return JSON.stringify({ graph: store.get(), readOnly: false });
 }
 
 export interface Viewer {
@@ -40,7 +36,7 @@ export async function startViewer(
   preferredPort: number,
   projectDir: string,
 ): Promise<Viewer> {
-  const clients = new Map<http.ServerResponse, Theme>();
+  const clients = new Set<http.ServerResponse>();
   let port = preferredPort;
 
   const server = http.createServer((req, res) => {
@@ -53,8 +49,8 @@ export async function startViewer(
         "Cache-Control": "no-cache, no-transform",
         Connection: "keep-alive",
       });
-      res.write(`data: ${payload(store, themeOf(url))}\n\n`);
-      clients.set(res, themeOf(url));
+      res.write(`data: ${payload(store)}\n\n`);
+      clients.add(res);
       // Proxies and browsers drop idle SSE streams; this keeps it warm.
       const ping = setInterval(() => res.write(": ping\n\n"), 25_000);
       req.on("close", () => {
@@ -72,12 +68,27 @@ export async function startViewer(
         const other = store.readChart(want);
         res.end(
           other
-            ? JSON.stringify({ graph: other, mermaid: toMermaid(other, themeOf(url)), readOnly: true })
+            ? JSON.stringify({ graph: other, readOnly: true })
             : JSON.stringify({ error: "no such chart" }),
         );
         return;
       }
-      res.end(payload(store, themeOf(url)));
+      res.end(payload(store));
+      return;
+    }
+
+    // Card appearance is configurable per user and per project.
+    if (pathname === "/config") {
+      res.writeHead(200, { "Content-Type": "application/json; charset=utf-8" });
+      res.end(JSON.stringify(loadThemeConfig(projectDir)));
+      return;
+    }
+
+    // An earlier build served a static /chart page. Redirect rather than 404:
+    // the URL is in old links and tool output, and "/" is what it wanted.
+    if (pathname === "/chart") {
+      const chart = url.searchParams.get("chart");
+      res.writeHead(302, { Location: chart ? `/?chart=${encodeURIComponent(chart)}` : "/" }).end();
       return;
     }
 
@@ -151,18 +162,15 @@ export async function startViewer(
   });
 
   store.subscribe(() => {
-    const cache = new Map<Theme, string>();
-    for (const [c, t] of clients) {
-      if (!cache.has(t)) cache.set(t, `data: ${payload(store, t)}\n\n`);
-      c.write(cache.get(t)!);
-    }
+    const frame = `data: ${payload(store)}\n\n`;
+    for (const c of clients) c.write(frame);
   });
 
   return {
     url: `http://127.0.0.1:${port}/`,
     port,
     close: () => {
-      for (const c of clients.keys()) c.end();
+      for (const c of clients) c.end();
       server.close();
     },
   };

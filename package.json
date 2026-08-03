@@ -8,16 +8,19 @@
   },
   "files": [
     "dist",
-    "public"
+    "public",
+    "scripts"
   ],
   "scripts": {
-    "build": "tsc",
+    "build": "tsc && node scripts/build-client.mjs",
     "dev": "tsc --watch",
     "start": "node dist/index.js",
-    "test": "tsc && node --test \"test/*.test.js\"",
-    "test:watch": "node --test --watch \"test/*.test.js\""
+    "test": "npm run build && node --test \"test/*.test.js\"",
+    "test:watch": "node --test --watch \"test/*.test.js\"",
+    "prepack": "npm run build"
   },
   "dependencies": {
+    "@dagrejs/dagre": "^3.1.0",
     "@modelcontextprotocol/sdk": "^1.12.0",
     "zod": "^3.23.8"
   },

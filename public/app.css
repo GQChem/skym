@@ -120,21 +120,6 @@ button.active {
 
 button.active:hover { color: #fff; filter: brightness(1.1); }
 
-.skym-inline-img {
-  cursor: zoom-in;
-  filter: drop-shadow(0 2px 6px rgba(0, 0, 0, 0.18));
-}
-
-/* Node width is driven here so the slider re-lays-out without a rebuild. */
-:root { --node-width: 250px; }
-
-/* Not scoped to #canvas: mermaid measures labels in a detached container. */
-.skym-width-spacer {
-  display: inline-block;
-  height: 0;
-  width: var(--node-width);
-}
-
 .width-ctl {
   display: flex;
   align-items: center;
@@ -149,17 +134,6 @@ button.active:hover { color: #fff; filter: brightness(1.1); }
   accent-color: var(--accent);
   cursor: ew-resize;
 }
-
-/* The slot only takes up space while inline figures are on. Scaled with the
-   node width so the figure keeps a sensible aspect ratio. */
-.skym-fig-slot {
-  display: inline-block;
-  width: calc(var(--node-width) - 20px);
-  height: 0;
-}
-
-body.inline-figs .skym-fig-slot { height: calc((var(--node-width) - 20px) * 0.6); }
-body.inline-figs .skym-fig-count { display: none; }
 
 main {
   flex: 1 1 auto;
@@ -184,39 +158,34 @@ main {
   padding: 24px;
 }
 
-#canvas svg { max-width: none !important; height: auto; }
+#canvas svg { display: block; }
 
-/* Nodes size to content; this sets the floor so boxes read as cards. */
-#canvas svg .nodeLabel { text-align: left; }
+.skym-node { cursor: pointer; }
 
-#canvas svg .cluster .nodeLabel { min-width: 0; }
+.skym-card { transition: stroke 0.12s ease, stroke-width 0.12s ease; }
 
-/* Live activity: a turning gear while working, a tipping hourglass while waiting. */
-.skym-gear,
-.skym-hourglass {
-  display: inline-block;
-  transform-origin: 50% 50%;
+.skym-node:hover .skym-card { filter: brightness(0.985); }
+
+:root[data-theme="dark"] .skym-node:hover .skym-card { filter: brightness(1.12); }
+
+.skym-node.is-selected { filter: drop-shadow(0 3px 10px rgba(20, 40, 80, 0.22)); }
+
+.skym-figure { cursor: zoom-in; }
+
+/* The working state pulses so a live chart reads as moving without animating
+   every card on screen. */
+.skym-node[data-state="exploring"] .skym-stripe {
+  animation: skym-pulse 1.9s ease-in-out infinite;
 }
 
-.skym-gear { animation: skym-spin 2.4s linear infinite; }
-.skym-hourglass { animation: skym-tip 2s ease-in-out infinite; }
-
-@keyframes skym-spin {
-  to { transform: rotate(360deg); }
-}
-
-@keyframes skym-tip {
-  0%, 45% { transform: rotate(0deg); }
-  55%, 95% { transform: rotate(180deg); }
-  100% { transform: rotate(360deg); }
+@keyframes skym-pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.35; }
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .skym-gear,
-  .skym-hourglass { animation: none; }
+  .skym-node[data-state="exploring"] .skym-stripe { animation: none; }
 }
-
-.node[id] { cursor: pointer; }
 
 .empty {
   position: absolute;
@@ -355,35 +324,63 @@ code {
 .legend {
   display: flex;
   flex-direction: column;
-  gap: 5px;
+  gap: 14px;
   font-size: 12.5px;
+}
+
+.leg-kind {
+  display: flex;
+  align-items: baseline;
+  gap: 7px;
+  margin-bottom: 5px;
+  font-size: 11px;
+  font-weight: 650;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.leg-kind span {
+  font-weight: 400;
+  letter-spacing: 0;
+  text-transform: none;
+  color: var(--muted);
 }
 
 .leg {
   display: grid;
-  grid-template-columns: 12px 88px 1fr;
+  grid-template-columns: 20px 82px 1fr;
   align-items: center;
   gap: 8px;
+  padding: 1.5px 0;
 }
 
-.sw {
-  width: 12px;
-  height: 12px;
+/* A miniature of a real card: fill, border, stripe, and glyph. */
+.leg-chip {
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 20px;
+  height: 15px;
+  border: 1px solid;
   border-radius: 3px;
-  border: 2px solid currentColor;
+  overflow: hidden;
 }
 
-.sw-planned { color: var(--st-planned); }
-.sw-exploring { color: var(--st-exploring); }
-.sw-waiting { color: var(--st-waiting); }
-.sw-done { color: var(--st-done); }
-.sw-abandoned { color: var(--st-abandoned); border-style: dashed; }
-.sw-blocked { color: var(--st-blocked); }
-.sw-good { color: var(--st-good); background: var(--st-good); }
-.sw-bad { color: var(--st-bad); background: var(--st-bad); }
-.sw-mixed { color: var(--st-mixed); background: var(--st-mixed); }
-.sw-inconclusive { color: var(--st-inconclusive); background: var(--st-inconclusive); }
-.sw-open { color: var(--st-open); border-style: dashed; }
+.leg-stripe {
+  position: absolute;
+  left: 0;
+  top: 0;
+  bottom: 0;
+  width: 2.5px;
+}
+
+.leg-glyph {
+  font-size: 9px;
+  font-weight: 700;
+  line-height: 1;
+  padding-left: 2px;
+}
 
 .note {
   margin: 10px 0;
@@ -429,24 +426,34 @@ figcaption {
 
 .events .what { overflow-wrap: anywhere; }
 
-/* Follows the hovered node; copies a prompt since the page cannot reach Claude. */
-.workon {
+/* Right-click menu; actions copy text since the page cannot reach Claude. */
+.node-menu {
   position: fixed;
   z-index: 40;
-  background: var(--accent);
-  color: #fff;
-  border: none;
-  border-radius: 7px;
-  padding: 5px 11px;
-  font-size: 12.5px;
-  font-weight: 600;
-  cursor: pointer;
+  display: flex;
+  flex-direction: column;
+  min-width: 168px;
+  padding: 4px;
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 9px;
   box-shadow: var(--shadow);
-  white-space: nowrap;
 }
 
-.workon:hover { filter: brightness(1.1); }
-.workon.copied { background: var(--st-good); }
+.node-menu button {
+  border: none;
+  background: transparent;
+  text-align: left;
+  padding: 7px 10px;
+  border-radius: 6px;
+  font-size: 13px;
+  color: var(--fg);
+}
+
+.node-menu button:hover {
+  background: var(--accent);
+  color: #fff;
+}
 
 .lightbox {
   position: fixed;

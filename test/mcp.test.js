@@ -35,8 +35,9 @@ test("exposes the expected tool surface", async () => {
   try {
     const names = (await s.client.listTools()).tools.map((t) => t.name).sort();
     assert.deepEqual(names, [
-      "flow_action", "flow_edge", "flow_figure", "flow_init",
-      "flow_options", "flow_remove", "flow_result", "flow_show", "flow_state",
+      "flow_action", "flow_chart", "flow_edge", "flow_figure", "flow_find",
+      "flow_init", "flow_note", "flow_options", "flow_remove", "flow_result",
+      "flow_show", "flow_state",
     ]);
   } finally {
     await s.client.close();
@@ -175,6 +176,48 @@ test("svg+xml figures get a .svg extension", async () => {
   }
 });
 
+test("replace swaps the figure and deletes the old file", async () => {
+  const s = await boot();
+  try {
+    const call = (name, args) => s.client.callTool({ name, arguments: args });
+    await call("flow_init", { title: "Replace" });
+    await call("flow_result", { id: "r", state: "good" });
+    const svg = (body) => Buffer.from(body).toString("base64");
+    await call("flow_figure", {
+      node_id: "r",
+      base64: svg("<svg xmlns='http://www.w3.org/2000/svg'><!--first--></svg>"),
+      mime: "image/svg+xml",
+    });
+    const assets = path.join(s.root, "charts", "replace", "assets");
+    assert.equal(fs.readdirSync(assets).length, 1);
+
+    // Appending without the flag keeps both.
+    await call("flow_figure", {
+      node_id: "r",
+      base64: svg("<svg xmlns='http://www.w3.org/2000/svg'><!--second--></svg>"),
+      mime: "image/svg+xml",
+    });
+    assert.equal(fs.readdirSync(assets).length, 2);
+
+    const r = await call("flow_figure", {
+      node_id: "r",
+      base64: svg("<svg xmlns='http://www.w3.org/2000/svg'><!--third--></svg>"),
+      mime: "image/svg+xml",
+      replace: true,
+    });
+    assert.match(text(r), /replaced/);
+    const left = fs.readdirSync(assets);
+    assert.equal(left.length, 1, `stale assets left behind: ${left.join(", ")}`);
+    assert.match(
+      fs.readFileSync(path.join(assets, left[0]), "utf8"),
+      /third/,
+      "the surviving file should be the newest",
+    );
+  } finally {
+    await s.client.close();
+  }
+});
+
 test("edges to unknown nodes are refused", async () => {
   const s = await boot();
   try {
@@ -205,17 +248,17 @@ test("folder puts the chart where asked", async () => {
   }
 });
 
-test("folder cannot escape the project directory", async () => {
+test("folder may point outside the project directory", async () => {
   const s = await boot();
   try {
-    for (const bad of ["../outside", "../../etc", path.resolve("/tmp/elsewhere")]) {
-      const r = await s.client.callTool({
-        name: "flow_init",
-        arguments: { title: "Escape", folder: bad },
-      });
-      assert.ok(r.isError, `${bad} should be refused`);
-      assert.match(text(r), /inside the project directory/);
-    }
+    const outside = path.join(os.tmpdir(), `skym-outside-${Date.now()}`);
+    const r = await s.client.callTool({
+      name: "flow_init",
+      arguments: { title: "Outside", folder: outside },
+    });
+    assert.ok(!r.isError, text(r));
+    assert.ok(fs.existsSync(path.join(outside, "charts")), "chart written outside the project");
+    fs.rmSync(outside, { recursive: true, force: true });
   } finally {
     await s.client.close();
   }
@@ -228,7 +271,146 @@ test("charts persist under .flows with a slugged directory", async () => {
     const dir = path.join(s.root, "charts", "my-great-chart");
     assert.ok(fs.existsSync(path.join(dir, "graph.json")));
     const saved = JSON.parse(fs.readFileSync(path.join(dir, "graph.json"), "utf8"));
-    assert.equal(saved.title, "My Great Chart!");
+    // v2: the snapshot is versioned, so the graph sits under a `graph` key.
+    assert.equal(saved.v, 2);
+    assert.equal(saved.graph.title, "My Great Chart!");
+
+    // Every mutation is also appended to the log the team tier will ship.
+    const log = fs.readFileSync(path.join(dir, "log.jsonl"), "utf8").trim().split("\n");
+    assert.equal(log.length, 1);
+    assert.equal(JSON.parse(log[0]).op.t, "init");
+  } finally {
+    await s.client.close();
+  }
+});
+
+test("flow_chart attaches a data-drawn figure without an image", async () => {
+  const s = await boot();
+  try {
+    const call = (name, args) => s.client.callTool({ name, arguments: args });
+    await call("flow_init", { title: "Charts" });
+    await call("flow_result", { id: "r", title: "Latency", state: "good" });
+    const out = await call("flow_chart", {
+      node_id: "r",
+      kind: "bar",
+      unit: "ms",
+      title: "p99 by build",
+      points: [
+        { label: "before", value: 840 },
+        { label: "after", value: 190, emphasis: true },
+      ],
+      caption: "p99 before and after",
+    });
+    assert.ok(!out.isError, text(out));
+    assert.match(text(out), /Chart attached/);
+
+    // The chart lands as a normal SVG figure, so everything downstream works.
+    const assets = path.join(s.root, "charts", "charts", "assets");
+    const files = fs.readdirSync(assets);
+    const svg = files.find((f) => f.endsWith(".svg"));
+    assert.ok(svg, "chart should be stored as an svg asset");
+    const body = fs.readFileSync(path.join(assets, svg), "utf8");
+    assert.match(body, /^<svg /);
+    assert.ok(body.includes("840ms"));
+    assert.ok(body.includes("190ms"));
+  } finally {
+    await s.client.close();
+  }
+});
+
+test("flow_chart rejects data it cannot draw honestly", async () => {
+  const s = await boot();
+  try {
+    const call = (name, args) => s.client.callTool({ name, arguments: args });
+    await call("flow_init", { title: "Chart guards" });
+    await call("flow_result", { id: "r", title: "X", state: "good" });
+
+    const twoStats = await call("flow_chart", {
+      node_id: "r",
+      kind: "stat",
+      points: [{ label: "a", value: 1 }, { label: "b", value: 2 }],
+    });
+    assert.ok(twoStats.isError, "a stat shows one number");
+
+    const missing = await call("flow_chart", {
+      node_id: "ghost",
+      kind: "bar",
+      points: [{ label: "a", value: 1 }],
+    });
+    assert.ok(missing.isError, "unknown node must be rejected");
+  } finally {
+    await s.client.close();
+  }
+});
+
+test("flow_find locates nodes without dumping the chart", async () => {
+  const s = await boot();
+  try {
+    const call = (name, args) => s.client.callTool({ name, arguments: args });
+    await call("flow_init", { title: "Findable" });
+    await call("flow_action", { id: "redis", title: "Swap cache to Redis", state: "done", bullets: ["TTL 60s"] });
+    await call("flow_action", { id: "lru", title: "In-process LRU", state: "planned" });
+    await call("flow_result", { id: "bench", title: "p99 dropped", state: "good", after: "redis" });
+
+    const byText = text(await call("flow_find", { query: "redis" }));
+    assert.match(byText, /redis/);
+    assert.ok(!byText.includes("In-process LRU"), "must not return non-matches");
+
+    // Bullets are searched too, not just titles.
+    assert.match(text(await call("flow_find", { query: "ttl" })), /redis/i);
+
+    const open = text(await call("flow_find", { unresolved: true }));
+    assert.match(open, /lru/);
+    assert.ok(!open.includes("bench"), "a good result is not unresolved");
+
+    assert.match(text(await call("flow_find", { kind: "result" })), /bench/);
+    assert.match(text(await call("flow_find", { query: "nothing-matches-this" })), /No nodes matched/);
+  } finally {
+    await s.client.close();
+  }
+});
+
+test("flow_note records context as its own kind", async () => {
+  const s = await boot();
+  try {
+    const call = (name, args) => s.client.callTool({ name, arguments: args });
+    await call("flow_init", { title: "Notes" });
+    await call("flow_action", { id: "work", title: "Do the thing" });
+    const r = await call("flow_note", {
+      id: "budget",
+      title: "Must stay under 200ms p99",
+      bullets: ["Hard SLO"],
+      about: "work",
+    });
+    assert.ok(!r.isError, text(r));
+    assert.match(text(r), /1 active/);
+
+    // A note is a note, not an action wearing a misleading state.
+    const found = text(await call("flow_find", { kind: "note" }));
+    assert.match(found, /budget.*note\/active/);
+
+    // `about` links it to what it constrains.
+    assert.ok(text(await call("flow_show", {})).includes("n_budget -.-> n_work"));
+  } finally {
+    await s.client.close();
+  }
+});
+
+test("a cycle is rejected through the tools with the path named", async () => {
+  const s = await boot();
+  try {
+    const call = (name, args) => s.client.callTool({ name, arguments: args });
+    await call("flow_init", { title: "No loops" });
+    await call("flow_action", { id: "a" });
+    await call("flow_action", { id: "b", after: "a" });
+    await call("flow_action", { id: "c", after: "b" });
+
+    const loop = await call("flow_edge", { from: "c", to: "a" });
+    assert.ok(loop.isError, "closing a loop must be rejected");
+    assert.match(text(loop), /cycle: a → b → c → a/);
+
+    const self = await call("flow_edge", { from: "a", to: "a" });
+    assert.ok(self.isError, "a self-edge must be rejected");
   } finally {
     await s.client.close();
   }

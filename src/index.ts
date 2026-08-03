@@ -14,6 +14,8 @@ import {
   type NodeState,
 } from "./store.js";
 import { toMermaid } from "./mermaid.js";
+import { renderChart, validateChart } from "./chart.js";
+import { DEFAULT_THEME, paletteFor } from "./theme.js";
 import { startViewer, type Viewer } from "./server.js";
 
 const projectDir = process.env.SKYM_PROJECT_DIR ?? process.cwd();
@@ -78,18 +80,11 @@ const bulletsSchema = z
   );
 
 /**
- * Charts are written wherever this points, so an absolute or `..` path would
- * let a tool call write outside the project. Keep it contained.
+ * Relative paths resolve against the project; absolute paths are taken as
+ * given, so a chart can live beside work that is not inside the project.
  */
 function resolveFolder(folder: string): string {
-  const abs = path.resolve(projectDir, folder);
-  const rel = path.relative(projectDir, abs);
-  if (rel.startsWith("..") || path.isAbsolute(rel)) {
-    throw new Error(
-      `folder must stay inside the project directory (${projectDir}); got "${folder}".`,
-    );
-  }
-  return abs;
+  return path.resolve(projectDir, folder);
 }
 
 function assertState(kind: NodeKind, state: string | undefined): NodeState | undefined {
@@ -289,7 +284,7 @@ server.registerTool(
     inputSchema: {
       id: z.string().describe("Node id."),
       state: z
-        .enum(["planned", "exploring", "waiting", "done", "abandoned", "blocked", "good", "bad", "mixed", "inconclusive", "open", "resolved"])
+        .enum(["planned", "exploring", "waiting", "done", "abandoned", "blocked", "good", "bad", "mixed", "inconclusive", "open", "resolved", "active", "retired"])
         .describe("Must be valid for that node's kind."),
     },
   },
@@ -346,9 +341,15 @@ server.registerTool(
       base64: z.string().optional().describe("Raw base64 image data."),
       mime: z.string().optional().describe("MIME for base64, e.g. 'image/png' or 'image/svg+xml'."),
       caption: z.string().optional().describe("What the figure shows."),
+      replace: z
+        .boolean()
+        .optional()
+        .describe(
+          "Drop the node's existing figures (and their files) instead of appending. Use when re-attaching a corrected version of the same figure.",
+        ),
     },
   },
-  async ({ node_id, path: filePath, base64, mime, caption }) => {
+  async ({ node_id, path: filePath, base64, mime, caption, replace }) => {
     if (!filePath && !base64) throw new Error("Provide either 'path' or 'base64'.");
     let data: Buffer;
     let ext = "png";
@@ -364,9 +365,160 @@ server.registerTool(
       // "image/svg+xml" must yield "svg", not "svg+xml".
       ext = (type.split("/")[1] ?? "png").split("+")[0].replace("jpeg", "jpg");
     }
-    store.attachFigure(node_id, data, type, caption, ext);
+    const had = store.findNode(node_id)?.figures.length ?? 0;
+    store.attachFigure(node_id, data, type, caption, ext, replace ?? false);
     await ensureViewer();
-    return ok(summary(`Figure attached to "${node_id}".`));
+    return ok(
+      summary(
+        replace && had
+          ? `Figure replaced on "${node_id}" (${had} removed).`
+          : `Figure attached to "${node_id}".`,
+      ),
+    );
+  },
+);
+
+server.registerTool(
+  "flow_find",
+  {
+    title: "Search this chat's chart",
+    description:
+      "Find nodes by text, kind, or state without dumping the whole chart. Use this when resuming a chart you did not build, to check what is still open, or to recover a node id before updating it. Returns ids you can pass straight to the other tools.",
+    inputSchema: {
+      query: z
+        .string()
+        .optional()
+        .describe("Case-insensitive text to match against ids, titles, and bullets."),
+      kind: z.enum(["action", "result", "options", "note"]).optional().describe("Only this kind."),
+      state: z
+        .enum([
+          "planned", "exploring", "waiting", "done", "abandoned", "blocked",
+          "good", "bad", "mixed", "inconclusive", "open", "resolved", "active", "retired",
+        ])
+        .optional()
+        .describe("Only this state. 'planned' finds unexplored branches; 'exploring' finds work left running."),
+      unresolved: z
+        .boolean()
+        .optional()
+        .describe("Only what still needs attention: planned, exploring, waiting, blocked, and open forks."),
+      limit: z.number().int().min(1).max(100).optional().describe("Cap the result count (default 25)."),
+    },
+  },
+  async ({ query, kind, state, unresolved, limit }) => {
+    const g = store.get();
+    const needle = query?.toLowerCase();
+    const OPEN: NodeState[] = ["planned", "exploring", "waiting", "blocked", "open"];
+
+    const hits = g.nodes.filter((n) => {
+      if (kind && n.kind !== kind) return false;
+      if (state && n.state !== state) return false;
+      if (unresolved && !OPEN.includes(n.state)) return false;
+      if (!needle) return true;
+      return (
+        n.id.toLowerCase().includes(needle) ||
+        n.title.toLowerCase().includes(needle) ||
+        n.bullets.some((b) => b.toLowerCase().includes(needle))
+      );
+    });
+
+    if (!hits.length) {
+      return ok(summary("No nodes matched.", "Try a broader query, or flow_show to see the whole chart."));
+    }
+
+    const shown = hits.slice(0, limit ?? 25);
+    const lines = shown.map((n) => {
+      const edges = g.edges.filter((e) => e.to === n.id).map((e) => e.from);
+      const after = edges.length ? ` ← ${edges.join(", ")}` : "";
+      const figures = n.figures.length ? ` [${n.figures.length} fig]` : "";
+      return `  ${n.id}  (${n.kind}/${n.state})${figures}  ${n.title}${after}`;
+    });
+    const more = hits.length > shown.length ? `\n  … ${hits.length - shown.length} more` : "";
+    return ok(summary(`${hits.length} match${hits.length === 1 ? "" : "es"}:\n${lines.join("\n")}${more}`));
+  },
+);
+
+server.registerTool(
+  "flow_note",
+  {
+    title: "Record standing context",
+    description:
+      "A constraint, fact, or open question that shapes the work without being a step in it — 'must stay under 200ms', 'the staging DB is a snapshot from March', 'unclear who owns this service'. Use when something matters but is not an action, result, or fork. Attach it to a node with `about:` when it constrains one branch.",
+    inputSchema: {
+      id: z.string().min(1).describe("Stable slug, e.g. 'latency-budget'."),
+      title: z.string().min(1).describe("The note itself, stated plainly."),
+      bullets: bulletsSchema.optional(),
+      state: z
+        .enum(["active", "retired"])
+        .optional()
+        .describe("active (default) = still true; retired = no longer applies, kept for the record."),
+      about: z
+        .string()
+        .optional()
+        .describe("Id of the node this constrains; draws a dashed edge from the note to it."),
+      group: z.string().optional().describe("Optional lane."),
+    },
+  },
+  async ({ id, title, bullets, state, about, group }) => {
+    validateBullets(bullets);
+    store.upsertNode({ id, title, kind: "note", state: assertState("note", state), bullets, group });
+    if (about) {
+      if (!store.findNode(about)) throw new Error(`Cannot attach a note to unknown node "${about}".`);
+      store.addEdge(id, about, undefined, true);
+    }
+    await ensureViewer();
+    return ok(summary(`Note "${id}" recorded.`));
+  },
+);
+
+server.registerTool(
+  "flow_chart",
+  {
+    title: "Draw a chart from data",
+    description:
+      "Attach a chart to a node from numbers directly — no image generation, and it is drawn in the chart's own palette so it matches the cards. Prefer this over flow_figure whenever the evidence is numeric. Use kind:'bar' to compare values, 'line' for a trend, 'stat' for a single headline number.",
+    inputSchema: {
+      node_id: z.string().describe("Node to attach the chart to — normally a result."),
+      kind: z
+        .enum(["bar", "line", "stat"])
+        .describe(
+          "bar = compare magnitudes; line = change over time; stat = one headline number. Pick by what the reader must do.",
+        ),
+      points: z
+        .array(
+          z.object({
+            label: z.string().min(1).describe("Category, time bucket, or (for a stat) what the number is."),
+            value: z.number().describe("The measurement."),
+            emphasis: z
+              .boolean()
+              .optional()
+              .describe("Marks the one point that matters; the rest recede. Use sparingly."),
+          }),
+        )
+        .min(1)
+        .max(12)
+        .describe("The data. At most 12 — past that a card-sized chart cannot label the points."),
+      title: z.string().optional().describe("Short label above the chart, e.g. 'p99 by build'."),
+      unit: z.string().optional().describe("Appended to values, e.g. 'ms', '%', 'MB'."),
+      delta: z.string().optional().describe("Stat only: the change, e.g. '-77% vs baseline'."),
+      caption: z.string().optional().describe("What the chart shows."),
+      replace: z.boolean().optional().describe("Drop existing figures on the node instead of appending."),
+    },
+  },
+  async ({ node_id, kind, points, title, unit, delta, caption, replace }) => {
+    const node = store.findNode(node_id);
+    if (!node) throw new Error(`No node with id "${node_id}".`);
+    const spec = { kind, points, title, unit, delta };
+    validateChart(spec);
+
+    // Rendered light: the card lays figures on a light plate in both themes.
+    const palette = paletteFor(DEFAULT_THEME, "light");
+    const accent = palette.states[node.state]?.accent ?? palette.focus;
+    const box = { width: 320, height: kind === "stat" ? 120 : 170 };
+    const svg = renderChart(spec, box, DEFAULT_THEME, palette, accent);
+
+    store.attachFigure(node_id, Buffer.from(svg, "utf8"), "image/svg+xml", caption, "svg", replace ?? false);
+    await ensureViewer();
+    return ok(summary(`Chart attached to "${node_id}" (${kind}, ${points.length} points).`));
   },
 );
 

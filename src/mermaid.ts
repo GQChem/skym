@@ -25,6 +25,8 @@ const STATE_MARK: Record<NodeState, string> = {
   inconclusive: "?",
   open: "⋔",
   resolved: "⌄",
+  active: "※",
+  retired: "·",
 };
 
 /** Wrapped so CSS can animate the mark without touching the rest of the label. */

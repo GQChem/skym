@@ -1,558 +1,591 @@
-(() => {
-  const canvas = document.getElementById("canvas");
-  const stage = document.getElementById("stage");
-  const empty = document.getElementById("empty");
-  const panel = document.getElementById("panel");
-  const detail = document.getElementById("detail");
-  const eventsEl = document.getElementById("events");
-  const dot = document.getElementById("live-dot");
-  const lightbox = document.getElementById("lightbox");
-  const lightboxImg = document.getElementById("lightbox-img");
+import dagre from "./vendor/dagre.js";
+import { detailForZoom, layoutGraph } from "./vendor/layout.js";
+import { renderSvg } from "./vendor/render.js";
+import { DEFAULT_THEME, KIND_LABEL, STATE_GLYPH, paletteFor, resolveTheme } from "./vendor/theme.js";
 
-  let state = null;
-  let selectedId = null;
-  // Viewing another chat's chart is read-only — no live stream for it.
-  let chartParam = new URLSearchParams(location.search).get("chart");
-  let ownChartId = null;
-  let inlineFigs = localStorage.getItem("skym-inline-figs") === "1";
-  // Set before the first render, or the slot measures zero and figures vanish.
-  document.body.classList.toggle("inline-figs", inlineFigs);
-  document.documentElement.style.setProperty(
-    "--node-width",
-    `${Number(localStorage.getItem("skym-node-width")) || 250}px`,
+const $ = (id) => document.getElementById(id);
+const canvas = $("canvas");
+const stage = $("stage");
+const empty = $("empty");
+const panel = $("panel");
+const detail = $("detail");
+const eventsEl = $("events");
+const dot = $("live-dot");
+const lightbox = $("lightbox");
+const lightboxImg = $("lightbox-img");
+const menu = $("node-menu");
+
+let state = null;
+let selectedId = null;
+let chartParam = new URLSearchParams(location.search).get("chart");
+let ownChartId = null;
+let theme = DEFAULT_THEME;
+let lastLayout = null;
+
+const store = {
+  get: (k, fallback) => {
+    const v = localStorage.getItem(`skym-${k}`);
+    return v === null ? fallback : v;
+  },
+  set: (k, v) => localStorage.setItem(`skym-${k}`, String(v)),
+};
+
+let showFigures = store.get("inline-figs", "1") === "1";
+let mode = store.get("theme", matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light");
+let view = { x: 0, y: 0, k: 1 };
+let userMovedView = false;
+/** Detail currently drawn; re-layout only when the zoom crosses a threshold. */
+let detailLevel = "full";
+/** "auto" follows zoom; the other values pin a level from the toolbar. */
+let detailMode = store.get("detail", "auto");
+
+document.documentElement.setAttribute("data-theme", mode);
+
+const escapeHtml = (s) =>
+  String(s).replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[c]);
+
+const assetUrl = (file) =>
+  `/assets/${encodeURIComponent(file)}${chartParam ? `?chart=${encodeURIComponent(chartParam)}` : ""}`;
+
+/** Project config may restyle cards; user settings win over neither yet. */
+const applyThemeOverrides = (overrides) => {
+  theme = resolveTheme(DEFAULT_THEME, overrides?.user, overrides?.project);
+};
+
+// --- view transform ---
+
+const applyView = () => {
+  canvas.style.transform = `translate(${view.x}px, ${view.y}px) scale(${view.k})`;
+};
+
+const fitOnce = () => {
+  if (!lastLayout || !lastLayout.width) return;
+  const pad = 56;
+  const k = Math.min(
+    (stage.clientWidth - pad) / lastLayout.width,
+    (stage.clientHeight - pad) / lastLayout.height,
+    1.4,
   );
-  let view = { x: 0, y: 0, k: 1 };
-  let userMovedView = false;
-  let renderToken = 0;
+  view.k = Math.max(k, 0.05);
+  view.x = (stage.clientWidth - lastLayout.width * view.k) / 2;
+  view.y = (stage.clientHeight - lastLayout.height * view.k) / 2;
+  applyView();
+};
 
-  const theme = () => document.documentElement.getAttribute("data-theme") || "light";
+/**
+ * Fitting sets a zoom, which may change the detail level, which changes the
+ * layout — so fit again against the new geometry. The guard bounds this to one
+ * extra pass: draw() calls fit(), and without it the two would recurse.
+ */
+let refitting = false;
 
-  // "base" + explicit vars, so the status classDefs drive node colour rather than
-  // fighting the built-in dark theme's near-black fills.
-  const initMermaid = () => {
-    const dark = theme() !== "light";
-    mermaid.initialize({
-      startOnLoad: false,
-      securityLevel: "loose",
-      theme: "base",
-      themeVariables: {
-        darkMode: dark,
-        background: dark ? "#1a2030" : "#f7f8fb",
-        primaryColor: dark ? "#2b3446" : "#eef2f9",
-        primaryTextColor: dark ? "#ffffff" : "#161c26",
-        primaryBorderColor: dark ? "#7b8aa8" : "#c2cbdb",
-        lineColor: dark ? "#9dabc6" : "#7a869c",
-        textColor: dark ? "#f2f5fa" : "#161c26",
-        clusterBkg: dark ? "#232b3d" : "#eef1f7",
-        clusterBorder: dark ? "#46516b" : "#d3dae6",
-        edgeLabelBackground: dark ? "#232b3d" : "#ffffff",
-        fontSize: "15px",
-      },
-      // padding is measured into the node box, so it widens without clipping.
-      flowchart: { curve: "basis", htmlLabels: true, useMaxWidth: false, padding: 40, nodeSpacing: 60, rankSpacing: 60 },
-    });
-  };
-
-  const applyView = () => {
-    canvas.style.transform = `translate(${view.x}px, ${view.y}px) scale(${view.k})`;
-  };
-
-  const fit = () => {
-    const svg = canvas.querySelector("svg");
-    if (!svg) return;
-    const box = svg.getBoundingClientRect();
-    const w = box.width / view.k;
-    const h = box.height / view.k;
-    if (!w || !h) return;
-    const pad = 48;
-    const k = Math.min((stage.clientWidth - pad) / w, (stage.clientHeight - pad) / h, 1.6);
-    view.k = Math.max(k, 0.08);
-    view.x = (stage.clientWidth - w * view.k) / 2;
-    view.y = (stage.clientHeight - h * view.k) / 2;
-    applyView();
-  };
-
-  // Mermaid regenerates the SVG wholesale, so selection is re-applied after each render.
-  const highlight = () => {
-    canvas.querySelectorAll(".node").forEach((n) => {
-      const on = selectedId && idMatches(n.id, selectedId);
-      n.style.filter = on ? "drop-shadow(0 0 7px var(--accent))" : "";
-    });
-  };
-
-  const cssSafe = (id) => id.replace(/[^a-zA-Z0-9_]/g, "_");
-
-  // Mermaid ids look like "flowchart-n_foo-12"; a substring test would let
-  // n_trigram match n_trigram_out, so compare the delimited segment exactly.
-  const idMatches = (elId, nodeId) =>
-    typeof elId === "string" && elId.split("-").includes(`n_${cssSafe(nodeId)}`);
-
-  const renderDetail = () => {
-    if (!state) return;
-    const node = state.graph.nodes.find((n) => n.id === selectedId);
-    if (!node) {
-      detail.className = "muted";
-      detail.textContent = "Click a node in the chart.";
-      return;
-    }
-    detail.className = "";
-    const parts = [];
-    parts.push(`<div class="detail-title"></div>`);
-    parts.push(
-      `<div class="chips"><span class="chip state-${node.state}">${node.state}</span>` +
-        `<span class="chip">${node.kind}</span>` +
-        (node.group ? `<span class="chip">${escapeHtml(node.group)}</span>` : "") +
-        `</div>`,
-    );
-    if (node.bullets && node.bullets.length) {
-      parts.push(`<ul class="bullets">${node.bullets.map((b) => `<li>${escapeHtml(b)}</li>`).join("")}</ul>`);
-    }
-    const q = chartParam ? `?chart=${encodeURIComponent(chartParam)}` : "";
-    for (const f of node.figures) {
-      parts.push(
-        `<figure><img src="/assets/${encodeURIComponent(f.file)}${q}" alt="${escapeHtml(f.caption || node.title)}" />` +
-          (f.caption ? `<figcaption>${escapeHtml(f.caption)}</figcaption>` : "") +
-          `</figure>`,
-      );
-    }
-    if (node.kind === "result" && node.figures.length === 0) {
-      parts.push(`<p class="muted nudge">No figure attached — results read best with a plot or screenshot.</p>`);
-    }
-    detail.innerHTML = parts.join("");
-    detail.querySelector(".detail-title").textContent = node.title;
-    detail.querySelectorAll("img").forEach((img) => {
-      img.addEventListener("click", () => {
-        lightboxImg.src = img.src;
-        lightbox.hidden = false;
-      });
-    });
-  };
-
-  // The viewer has no channel back to Claude, so the button copies a prompt.
-  const workOnBtn = document.getElementById("workon");
-  let workOnNode = null;
-  let workOnRect = null;
-  let hideTimer = null;
-
-  const promptFor = (n) => {
-    const lines = [`Work on node "${n.id}" from the chart: ${n.title}`];
-    if (n.bullets?.length) lines.push(...n.bullets.map((b) => `- ${b}`));
-    lines.push(`(currently ${n.kind}/${n.state})`);
-    return lines.join("\n");
-  };
-
-  // Anchored just inside the node's top-right corner: overlapping the node
-  // means there is no gap to cross, so moving to the button never leaves it.
-  const showWorkOn = (el, node) => {
-    clearTimeout(hideTimer);
-    workOnNode = node;
-    workOnRect = el.getBoundingClientRect();
-    workOnBtn.hidden = false;
-    workOnBtn.classList.remove("copied");
-    workOnBtn.textContent = "⚙ Work on this";
-    workOnBtn.style.visibility = "hidden";
-    // Measure after the text is set so the width is real.
-    requestAnimationFrame(() => {
-      const bw = workOnBtn.offsetWidth || 118;
-      workOnBtn.style.left = `${Math.max(6, workOnRect.right - bw - 8)}px`;
-      workOnBtn.style.top = `${Math.max(6, workOnRect.top + 8)}px`;
-      workOnBtn.style.visibility = "visible";
-    });
-  };
-
-  const scheduleHide = () => {
-    clearTimeout(hideTimer);
-    hideTimer = setTimeout(() => {
-      workOnBtn.hidden = true;
-      workOnNode = null;
-      workOnRect = null;
-    }, 500);
-  };
-
-  // Hide only when the pointer is outside BOTH the node and the button,
-  // rather than on any single mouseleave.
-  const pointerInside = (x, y, rect, pad = 0) =>
-    rect && x >= rect.left - pad && x <= rect.right + pad && y >= rect.top - pad && y <= rect.bottom + pad;
-
-  stage.addEventListener("mousemove", (e) => {
-    if (workOnBtn.hidden) return;
-    const overNode = pointerInside(e.clientX, e.clientY, workOnRect, 4);
-    const overBtn = pointerInside(e.clientX, e.clientY, workOnBtn.getBoundingClientRect(), 6);
-    if (overNode || overBtn) clearTimeout(hideTimer);
-    else scheduleHide();
-  });
-
-  stage.addEventListener("mouseleave", scheduleHide);
-  workOnBtn.addEventListener("mouseenter", () => clearTimeout(hideTimer));
-
-  workOnBtn.addEventListener("click", async (ev) => {
-    ev.stopPropagation();
-    if (!workOnNode) return;
-    const promptText = promptFor(workOnNode);
+const fit = () => {
+  fitOnce();
+  if (refitting || detailMode !== "auto" || !state) return;
+  if (detailForZoom(view.k) !== detailLevel) {
+    refitting = true;
     try {
-      await navigator.clipboard.writeText(promptText);
-    } catch {
-      // Clipboard API needs a secure context; fall back to a temp textarea.
-      const ta = document.createElement("textarea");
-      ta.value = promptText;
-      document.body.appendChild(ta);
-      ta.select();
-      document.execCommand("copy");
-      ta.remove();
+      draw();
+      fitOnce();
+    } finally {
+      refitting = false;
     }
-    workOnBtn.classList.add("copied");
-    workOnBtn.textContent = "✓ Copied — paste to Claude";
-  });
+  }
+};
 
-  const LEGEND = [
-    ["action", "planned", "candidate step"],
-    ["action", "exploring", "working now ⚙"],
-    ["action", "waiting", "blocked on a wait ⏳"],
-    ["action", "done", "finished"],
-    ["action", "abandoned", "dead end"],
-    ["action", "blocked", "stuck"],
-    ["result", "good", "it worked"],
-    ["result", "bad", "it did not"],
-    ["result", "mixed", "tradeoffs"],
-    ["result", "inconclusive", "needs more"],
-    ["options", "open", "undecided fork"],
-  ];
+// --- rendering ---
 
-  const renderLegend = () => {
-    document.getElementById("legend").innerHTML = LEGEND.map(
-      ([kind, st, what]) =>
-        `<div class="leg"><span class="sw sw-${st}"></span><b>${st}</b><span class="muted">${kind} · ${what}</span></div>`,
-    ).join("");
-  };
+const draw = () => {
+  if (!state) return;
+  const graph = state.graph;
+  $("project").textContent = graph.title || "skym";
+  $("rev").textContent = `rev ${graph.revision}`;
 
-  const escapeHtml = (s) =>
-    String(s).replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[c]);
-
-  const renderEvents = () => {
-    if (!state) return;
-    const items = state.graph.events.slice(-40).reverse();
-    eventsEl.innerHTML = items
-      .map((e) => {
-        const t = new Date(e.at).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", second: "2-digit" });
-        return `<li><time>${t}</time><span class="what">${escapeHtml(e.kind)} · ${escapeHtml(e.detail)}</span></li>`;
-      })
-      .join("");
-  };
-
-  const render = async (next) => {
-    state = next;
-    document.getElementById("project").textContent = state.graph.title || "skym";
-    document.getElementById("rev").textContent = `rev ${state.graph.revision}`;
-
-    if (state.graph.chartId) ownChartId = ownChartId ?? state.graph.chartId;
-    const has = state.graph.nodes.length > 0;
-    empty.hidden = has;
-    if (!has) {
-      canvas.innerHTML = "";
-      renderDetail();
-      renderEvents();
-      return;
-    }
-
-    const token = ++renderToken;
-    try {
-      const { svg } = await mermaid.render(`skym-${token}`, state.mermaid);
-      if (token !== renderToken) return; // A newer update landed mid-render.
-      canvas.innerHTML = svg;
-    } catch (err) {
-      canvas.innerHTML = `<pre style="color:#ff6b7d;white-space:pre-wrap">${escapeHtml(String(err))}</pre>`;
-      return;
-    }
-
-    canvas.querySelectorAll(".node").forEach((el) => {
-      const match = state.graph.nodes.find((n) => idMatches(el.id, n.id));
-      el.addEventListener("click", (ev) => {
-        ev.stopPropagation();
-        if (match) {
-          selectedId = match.id;
-          renderDetail();
-          highlight();
-        }
-      });
-      if (match && !chartParam) {
-        el.addEventListener("mouseenter", () => showWorkOn(el, match));
-      }
-    });
-
-    // Slot heights come from CSS, so wait for layout before measuring them.
-    requestAnimationFrame(renderInlineFigures);
-    if (!userMovedView) fit();
-    else applyView();
-    highlight();
+  const has = graph.nodes.length > 0;
+  empty.hidden = has;
+  if (!has) {
+    canvas.innerHTML = "";
+    lastLayout = null;
     renderDetail();
     renderEvents();
-  };
+    return;
+  }
 
-  // Figures are overlaid on the SVG rather than injected into mermaid labels,
-  // which keeps layout measurement (and therefore node sizing) intact.
-  const renderInlineFigures = () => {
-    canvas.querySelectorAll(".skym-inline-fig").forEach((e) => e.remove());
-    if (!inlineFigs || !state) return;
-    const svg = canvas.querySelector("svg");
-    if (!svg) return;
-    const q = chartParam ? `?chart=${encodeURIComponent(chartParam)}` : "";
-
-    for (const node of state.graph.nodes) {
-      if (!node.figures?.length) continue;
-      const el = [...canvas.querySelectorAll(".node")].find((e) => idMatches(e.id, node.id));
-      if (!el) continue;
-      // Prefer the reserved slot. An older server build emits no slot markup,
-      // so fall back to the lower part of the node rather than showing nothing.
-      const slot = el.querySelector(".skym-fig-slot");
-      const svgRect = svg.getBoundingClientRect();
-      let sr = slot?.getBoundingClientRect();
-      if (!sr || !sr.width || !sr.height) {
-        const nb = el.getBoundingClientRect();
-        if (!nb.width || !nb.height) continue;
-        const w = Math.min(nb.width - 28, 240);
-        const h = Math.min(w * 0.6, nb.height - 16);
-        if (h < 24) continue;
-        sr = { left: nb.left + (nb.width - w) / 2, top: nb.bottom - h - 10, width: w, height: h };
-      }
-      const vb = svg.viewBox.baseVal;
-      const sx = (vb?.width || svgRect.width) / svgRect.width;
-      const sy = (vb?.height || svgRect.height) / svgRect.height;
-      const x = (sr.left - svgRect.left) * sx + (vb?.x ?? 0);
-      const y = (sr.top - svgRect.top) * sy + (vb?.y ?? 0);
-
-      const img = document.createElementNS("http://www.w3.org/2000/svg", "image");
-      img.setAttribute("href", `/assets/${encodeURIComponent(node.figures[0].file)}${q}`);
-      img.setAttribute("x", x);
-      img.setAttribute("y", y);
-      img.setAttribute("width", sr.width * sx);
-      img.setAttribute("height", sr.height * sy);
-      img.setAttribute("preserveAspectRatio", "xMidYMid meet");
-      img.setAttribute("class", "skym-inline-fig skym-inline-img");
-      img.addEventListener("click", (ev) => {
-        ev.stopPropagation();
-        lightboxImg.src = img.getAttribute("href");
-        lightbox.hidden = false;
-      });
-      svg.appendChild(img);
-    }
-  };
-
-  // --- pan / zoom ---
-  let dragging = false;
-  let last = { x: 0, y: 0 };
-
-  stage.addEventListener("mousedown", (e) => {
-    dragging = true;
-    last = { x: e.clientX, y: e.clientY };
-    stage.classList.add("dragging");
+  detailLevel = detailMode === "auto" ? detailForZoom(view.k) : detailMode;
+  lastLayout = layoutGraph(graph, theme, dagre, showFigures, detailLevel);
+  canvas.innerHTML = renderSvg(lastLayout, {
+    theme,
+    palette: paletteFor(theme, mode),
+    figureSrc: assetUrl,
+    selectedId,
+    interactive: true,
   });
 
-  window.addEventListener("mousemove", (e) => {
-    if (!dragging) return;
-    view.x += e.clientX - last.x;
-    view.y += e.clientY - last.y;
-    last = { x: e.clientX, y: e.clientY };
+  bindNodes();
+  if (!userMovedView) fit();
+  else applyView();
+  renderDetail();
+  renderEvents();
+};
+
+const bindNodes = () => {
+  for (const el of canvas.querySelectorAll(".skym-node")) {
+    const id = el.dataset.id;
+    el.addEventListener("click", (ev) => {
+      ev.stopPropagation();
+      select(id);
+    });
+    el.addEventListener("contextmenu", (ev) => {
+      ev.preventDefault();
+      ev.stopPropagation();
+      openMenu(id, ev.clientX, ev.clientY);
+    });
+  }
+  for (const img of canvas.querySelectorAll(".skym-figure")) {
+    img.addEventListener("click", (ev) => {
+      ev.stopPropagation();
+      zoom(img.getAttribute("href"));
+    });
+  }
+};
+
+const select = (id) => {
+  selectedId = id;
+  // Repaint only the selection ring rather than re-laying-out the whole graph.
+  for (const el of canvas.querySelectorAll(".skym-node")) {
+    const rect = el.querySelector(".skym-card");
+    if (!rect) continue;
+    const on = el.dataset.id === id;
+    const ink = paletteFor(theme, mode).states[el.dataset.state];
+    rect.setAttribute("stroke", on ? paletteFor(theme, mode).focus : ink.border);
+    rect.setAttribute("stroke-width", on ? theme.card.selectedWidth : theme.card.borderWidth);
+    el.classList.toggle("is-selected", on);
+  }
+  renderDetail();
+};
+
+const zoom = (src) => {
+  lightboxImg.src = src;
+  lightbox.hidden = false;
+};
+
+const renderDetail = () => {
+  if (!state) return;
+  const node = state.graph.nodes.find((n) => n.id === selectedId);
+  if (!node) {
+    detail.className = "muted";
+    detail.textContent = "Click a node in the chart.";
+    return;
+  }
+  detail.className = "";
+  const parts = [
+    `<div class="detail-title"></div>`,
+    `<div class="chips"><span class="chip state-${node.state}">${escapeHtml(node.state)}</span>` +
+      `<span class="chip">${escapeHtml(node.kind)}</span>` +
+      (node.group ? `<span class="chip">${escapeHtml(node.group)}</span>` : "") +
+      `</div>`,
+  ];
+  if (node.bullets?.length) {
+    parts.push(`<ul class="bullets">${node.bullets.map((b) => `<li>${escapeHtml(b)}</li>`).join("")}</ul>`);
+  }
+  for (const f of node.figures) {
+    parts.push(
+      `<figure><img src="${escapeHtml(assetUrl(f.file))}" alt="${escapeHtml(f.caption || node.title)}" />` +
+        (f.caption ? `<figcaption>${escapeHtml(f.caption)}</figcaption>` : "") +
+        `</figure>`,
+    );
+  }
+  if (node.kind === "result" && !node.figures.length) {
+    parts.push(`<p class="muted nudge">No figure attached — results read best with a plot or screenshot.</p>`);
+  }
+  detail.innerHTML = parts.join("");
+  detail.querySelector(".detail-title").textContent = node.title;
+  for (const img of detail.querySelectorAll("img")) {
+    img.addEventListener("click", () => zoom(img.src));
+  }
+};
+
+const renderEvents = () => {
+  if (!state) return;
+  eventsEl.innerHTML = state.graph.events
+    .slice(-40)
+    .reverse()
+    .map((e) => {
+      const t = new Date(e.at).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", second: "2-digit" });
+      return `<li><time>${t}</time><span class="what">${escapeHtml(e.kind)} · ${escapeHtml(e.detail)}</span></li>`;
+    })
+    .join("");
+};
+
+// Grouped by kind: the vocabulary is three kinds each with its own states, and
+// a flat list of twelve hides that structure.
+const LEGEND_GROUPS = [
+  {
+    kind: "action",
+    blurb: "something done or to be done",
+    states: [
+      ["planned", "not started"],
+      ["exploring", "working now"],
+      ["waiting", "blocked on a wait"],
+      ["done", "finished"],
+      ["blocked", "stuck"],
+      ["abandoned", "dead end"],
+    ],
+  },
+  {
+    kind: "result",
+    blurb: "what an action produced",
+    states: [
+      ["good", "it worked"],
+      ["bad", "it did not"],
+      ["mixed", "tradeoffs"],
+      ["inconclusive", "needs more"],
+    ],
+  },
+  {
+    kind: "options",
+    blurb: "a fork in the work",
+    states: [
+      ["open", "undecided"],
+      ["resolved", "decided"],
+    ],
+  },
+  {
+    kind: "note",
+    blurb: "context, not a step",
+    states: [
+      ["active", "still true"],
+      ["retired", "no longer applies"],
+    ],
+  },
+];
+
+const renderLegend = () => {
+  const palette = paletteFor(theme, mode);
+  $("legend").innerHTML = LEGEND_GROUPS.map(
+    (g) =>
+      `<div class="leg-group">` +
+      `<div class="leg-kind">${escapeHtml(KIND_LABEL[g.kind] ?? g.kind)}<span>${escapeHtml(g.blurb)}</span></div>` +
+      g.states
+        .map(([st, what]) => {
+          const ink = palette.states[st];
+          // A miniature of the real card, so the legend teaches the chart.
+          return (
+            `<div class="leg" data-state="${st}">` +
+            `<span class="leg-chip" style="background:${ink.fill};border-color:${ink.border}">` +
+            `<span class="leg-stripe" style="background:${ink.accent}"></span>` +
+            `<span class="leg-glyph" style="color:${ink.accent}">${escapeHtml(STATE_GLYPH[st] ?? "•")}</span>` +
+            `</span>` +
+            `<b>${escapeHtml(st)}</b><span class="muted">${escapeHtml(what)}</span></div>`
+          );
+        })
+        .join("") +
+      `</div>`,
+  ).join("");
+};
+
+// --- node action menu ---
+
+let menuNode = null;
+
+const MENU_ITEMS = [
+  { label: "Work on this", run: (n) => copy(promptFor(n)) },
+  { label: "Copy node id", run: (n) => copy(n.id) },
+  { label: "Copy node", run: (n) => copy(nodeAsText(n)) },
+];
+
+const promptFor = (n) => {
+  const lines = [`Work on node "${n.id}" from the chart: ${n.title}`];
+  if (n.bullets?.length) lines.push(...n.bullets.map((b) => `- ${b}`));
+  lines.push(`(currently ${n.kind}/${n.state})`);
+  return lines.join("\n");
+};
+
+const nodeAsText = (n) =>
+  [`${n.title} [${n.kind}/${n.state}]`, ...(n.bullets ?? []).map((b) => `- ${b}`)].join("\n");
+
+const copy = async (text) => {
+  try {
+    await navigator.clipboard.writeText(text);
+  } catch {
+    // Clipboard API needs a secure context; fall back to a temp textarea.
+    const ta = document.createElement("textarea");
+    ta.value = text;
+    document.body.appendChild(ta);
+    ta.select();
+    document.execCommand("copy");
+    ta.remove();
+  }
+};
+
+const openMenu = (id, x, y) => {
+  const node = state?.graph.nodes.find((n) => n.id === id);
+  if (!node || state.readOnly) return;
+  menuNode = node;
+  menu.innerHTML = MENU_ITEMS.map((m, i) => `<button data-i="${i}">${escapeHtml(m.label)}</button>`).join("");
+  menu.hidden = false;
+  // Measure before placing, so the menu never hangs off the viewport.
+  const r = menu.getBoundingClientRect();
+  menu.style.left = `${Math.min(x, innerWidth - r.width - 8)}px`;
+  menu.style.top = `${Math.min(y, innerHeight - r.height - 8)}px`;
+  for (const btn of menu.querySelectorAll("button")) {
+    btn.addEventListener("click", async () => {
+      await MENU_ITEMS[Number(btn.dataset.i)].run(menuNode);
+      btn.textContent = "Copied";
+      setTimeout(closeMenu, 550);
+    });
+  }
+};
+
+const closeMenu = () => {
+  menu.hidden = true;
+  menuNode = null;
+};
+
+// --- pan / zoom ---
+
+let drag = null;
+
+stage.addEventListener("pointerdown", (e) => {
+  if (e.button !== 0) return;
+  closeMenu();
+  drag = { x: e.clientX, y: e.clientY, vx: view.x, vy: view.y, moved: false };
+  stage.setPointerCapture(e.pointerId);
+  stage.classList.add("dragging");
+});
+
+stage.addEventListener("pointermove", (e) => {
+  if (!drag) return;
+  view.x = drag.vx + e.clientX - drag.x;
+  view.y = drag.vy + e.clientY - drag.y;
+  if (Math.abs(e.clientX - drag.x) + Math.abs(e.clientY - drag.y) > 3) {
+    drag.moved = true;
+    userMovedView = true;
+  }
+  applyView();
+});
+
+const endDrag = () => {
+  drag = null;
+  stage.classList.remove("dragging");
+};
+
+stage.addEventListener("pointerup", endDrag);
+stage.addEventListener("pointercancel", endDrag);
+
+stage.addEventListener(
+  "wheel",
+  (e) => {
+    e.preventDefault();
+    const r = stage.getBoundingClientRect();
+    const mx = e.clientX - r.left;
+    const my = e.clientY - r.top;
+    const k = Math.min(Math.max(view.k * Math.exp(-e.deltaY * 0.0015), 0.05), 5);
+    view.x = mx - ((mx - view.x) * k) / view.k;
+    view.y = my - ((my - view.y) * k) / view.k;
+    view.k = k;
     userMovedView = true;
     applyView();
-  });
+    maybeRelayout();
+  },
+  { passive: false },
+);
 
-  window.addEventListener("mouseup", () => {
-    dragging = false;
-    stage.classList.remove("dragging");
-  });
+/**
+ * Cards shed bullets and figures as the view zooms out, which changes their
+ * size — so crossing a threshold is a re-layout, not just a repaint. The graph
+ * is re-centred on whatever the viewport was looking at, or the whole thing
+ * appears to jump when the geometry changes underneath.
+ */
+const maybeRelayout = () => {
+  if (detailMode !== "auto" || !state || !lastLayout) return;
+  const next = detailForZoom(view.k);
+  if (next === detailLevel) return;
 
-  stage.addEventListener(
-    "wheel",
-    (e) => {
-      e.preventDefault();
-      const rect = stage.getBoundingClientRect();
-      const mx = e.clientX - rect.left;
-      const my = e.clientY - rect.top;
-      const factor = Math.exp(-e.deltaY * 0.0015);
-      const k = Math.min(Math.max(view.k * factor, 0.08), 6);
-      // Zoom about the cursor rather than the origin.
-      view.x = mx - ((mx - view.x) * k) / view.k;
-      view.y = my - ((my - view.y) * k) / view.k;
-      view.k = k;
-      userMovedView = true;
-      applyView();
-    },
-    { passive: false },
-  );
+  const cx = (stage.clientWidth / 2 - view.x) / view.k / lastLayout.width;
+  const cy = (stage.clientHeight / 2 - view.y) / view.k / lastLayout.height;
+  draw();
+  if (lastLayout) {
+    view.x = stage.clientWidth / 2 - cx * lastLayout.width * view.k;
+    view.y = stage.clientHeight / 2 - cy * lastLayout.height * view.k;
+    applyView();
+  }
+};
 
-  document.getElementById("fit").addEventListener("click", () => {
-    userMovedView = false;
-    fit();
-  });
+// --- chrome ---
 
-  const widthEl = document.getElementById("node-width");
-  let nodeWidth = Number(localStorage.getItem("skym-node-width")) || 250;
-  let widthTimer = null;
+$("fit").addEventListener("click", () => {
+  userMovedView = false;
+  fit();
+});
 
-  const applyWidth = () => {
-    document.documentElement.style.setProperty("--node-width", `${nodeWidth}px`);
-    widthEl.value = String(nodeWidth);
-    widthEl.title = `Node width: ${nodeWidth}px`;
-  };
+const widthEl = $("node-width");
+widthEl.value = String(theme.card.width);
 
-  widthEl.addEventListener("input", () => {
-    nodeWidth = Number(widthEl.value);
-    applyWidth();
-    // Mermaid measures labels at render time, so re-render to re-lay-out.
-    clearTimeout(widthTimer);
-    widthTimer = setTimeout(() => {
-      localStorage.setItem("skym-node-width", String(nodeWidth));
-      if (state) render(state);
-    }, 140);
-  });
+widthEl.addEventListener("input", () => {
+  const width = Number(widthEl.value);
+  theme = resolveTheme(theme, { card: { width } });
+  widthEl.title = `Card width: ${width}px`;
+  store.set("node-width", width);
+  draw();
+});
 
-  const inlineBtn = document.getElementById("inline-figs");
-  const syncInlineBtn = () => {
-    inlineBtn.classList.toggle("active", inlineFigs);
-    document.body.classList.toggle("inline-figs", inlineFigs);
-  };
+const detailEl = $("detail-level");
+detailEl.value = detailMode;
 
-  inlineBtn.addEventListener("click", async () => {
-    inlineFigs = !inlineFigs;
-    localStorage.setItem("skym-inline-figs", inlineFigs ? "1" : "0");
-    syncInlineBtn();
-    // The slot changes height, so mermaid must re-measure and re-lay out.
-    if (state) await render(state);
-  });
+detailEl.addEventListener("change", () => {
+  detailMode = detailEl.value;
+  store.set("detail", detailMode);
+  draw();
+});
 
-  document.getElementById("panel-toggle").addEventListener("click", () => {
-    panel.classList.toggle("hidden");
-    if (!userMovedView) fit();
-  });
+const figBtn = $("inline-figs");
+const syncFigBtn = () => figBtn.classList.toggle("active", showFigures);
 
-  document.getElementById("theme").addEventListener("click", async () => {
-    const next = theme() === "light" ? "dark" : "light";
-    document.documentElement.setAttribute("data-theme", next);
-    localStorage.setItem("skym-theme", next);
-    initMermaid();
-    // The classDefs are baked server-side, so refetch and reconnect on the new theme.
-    const fresh = await fetch(`/graph?theme=${next}`).then((r) => r.json());
-    await render(fresh);
-    reconnect();
-  });
+figBtn.addEventListener("click", () => {
+  showFigures = !showFigures;
+  store.set("inline-figs", showFigures ? "1" : "0");
+  syncFigBtn();
+  draw();
+});
 
-  document.getElementById("export").addEventListener("click", () => {
-    const svg = canvas.querySelector("svg");
-    if (!svg) return;
-    const blob = new Blob([svg.outerHTML], { type: "image/svg+xml" });
-    const a = document.createElement("a");
-    a.href = URL.createObjectURL(blob);
-    a.download = `${(state?.graph.title || "chart").replace(/[^a-z0-9]+/gi, "-").toLowerCase()}.svg`;
-    a.click();
-    URL.revokeObjectURL(a.href);
-  });
+$("panel-toggle").addEventListener("click", () => {
+  panel.classList.toggle("hidden");
+  if (!userMovedView) fit();
+});
 
-  lightbox.addEventListener("click", () => {
+$("theme").addEventListener("click", () => {
+  mode = mode === "light" ? "dark" : "light";
+  store.set("theme", mode);
+  document.documentElement.setAttribute("data-theme", mode);
+  // Layout is client-side now, so a theme flip is a repaint — no refetch.
+  renderLegend();
+  draw();
+});
+
+$("export").addEventListener("click", () => {
+  const svg = canvas.querySelector("svg");
+  if (!svg) return;
+  const blob = new Blob([svg.outerHTML], { type: "image/svg+xml" });
+  const a = document.createElement("a");
+  a.href = URL.createObjectURL(blob);
+  a.download = `${(state?.graph.title || "chart").replace(/[^a-z0-9]+/gi, "-").toLowerCase()}.svg`;
+  a.click();
+  URL.revokeObjectURL(a.href);
+});
+
+lightbox.addEventListener("click", () => {
+  lightbox.hidden = true;
+  lightboxImg.src = "";
+});
+
+stage.addEventListener("click", () => closeMenu());
+
+window.addEventListener("keydown", (e) => {
+  if (e.key === "Escape") {
     lightbox.hidden = true;
     lightboxImg.src = "";
-  });
-
-  window.addEventListener("keydown", (e) => {
-    if (e.key === "Escape") {
-      lightbox.hidden = true;
-      lightboxImg.src = "";
-    }
-    if (e.key === "f") {
-      userMovedView = false;
-      fit();
-    }
-  });
-
-  window.addEventListener("resize", () => {
-    if (!userMovedView) fit();
-  });
-
-  // --- live connection ---
-  let es = null;
-
-  const reconnect = () => {
-    if (es) es.close();
-    connect();
-  };
-
-  const connect = () => {
-    es = new EventSource(`/events?theme=${theme()}`);
-    es.onopen = () => {
-      dot.classList.add("live");
-      dot.title = "live";
-    };
-    es.onmessage = (ev) => {
-      try {
-        render(JSON.parse(ev.data));
-      } catch {
-        /* ignore malformed frame */
-      }
-    };
-    es.onerror = () => {
-      dot.classList.remove("live");
-      dot.title = "reconnecting…";
-      // EventSource retries on its own; no manual reconnect needed.
-    };
-  };
-
-  const chartsEl = document.getElementById("charts");
-
-  const refreshCharts = async () => {
-    try {
-      const list = await fetch("/charts").then((r) => r.json());
-      if (!list.length) {
-        chartsEl.hidden = true;
-        return;
-      }
-      chartsEl.hidden = list.length < 2;
-      const cur = chartParam || list.find((c) => c.active)?.chartId;
-      chartsEl.innerHTML = list
-        .map(
-          (c) =>
-            `<option value="${c.chartId}"${c.chartId === cur ? " selected" : ""}>` +
-            `${c.title} (${c.nodes})${c.active ? " ● live" : ""}</option>`,
-        )
-        .join("");
-    } catch {
-      chartsEl.hidden = true;
-    }
-  };
-
-  chartsEl.addEventListener("change", async () => {
-    const pick = chartsEl.value;
-    chartParam = pick === ownChartId ? null : pick;
-    const url = chartParam ? `/graph?chart=${encodeURIComponent(chartParam)}&theme=${theme()}` : `/graph?theme=${theme()}`;
-    const fresh = await fetch(url).then((r) => r.json());
-    selectedId = null;
+    closeMenu();
+  }
+  if (e.key === "f" && !e.metaKey && !e.ctrlKey) {
     userMovedView = false;
-    await render(fresh);
-    // Only the live chart streams; a historical one is a static snapshot.
-    if (!chartParam) reconnect();
-    else if (es) es.close();
-    document.getElementById("live-dot").classList.toggle("live", !chartParam);
-    document.getElementById("live-dot").title = chartParam ? "read-only snapshot" : "live";
-  });
+    fit();
+  }
+});
 
-  // With several projects open, each on its own port, name the project so a
-  // tab is identifiable and the title bar is not just "skym".
+window.addEventListener("resize", () => {
+  if (!userMovedView) fit();
+});
+
+// --- live connection ---
+
+let es = null;
+
+const connect = () => {
+  if (es) es.close();
+  es = new EventSource("/events");
+  es.onopen = () => {
+    dot.classList.add("live");
+    dot.title = "live";
+  };
+  es.onmessage = (ev) => {
+    try {
+      state = JSON.parse(ev.data);
+      draw();
+    } catch {
+      /* ignore malformed frame */
+    }
+  };
+  es.onerror = () => {
+    dot.classList.remove("live");
+    dot.title = "reconnecting…";
+  };
+};
+
+const chartsEl = $("charts");
+
+const refreshCharts = async () => {
+  try {
+    const list = await fetch("/charts").then((r) => r.json());
+    if (!list.length) {
+      chartsEl.hidden = true;
+      return;
+    }
+    chartsEl.hidden = list.length < 2;
+    const cur = chartParam || list.find((c) => c.active)?.chartId;
+    chartsEl.innerHTML = list
+      .map(
+        (c) =>
+          `<option value="${escapeHtml(c.chartId)}"${c.chartId === cur ? " selected" : ""}>` +
+          `${escapeHtml(c.title)} (${c.nodes})${c.active ? " ● live" : ""}</option>`,
+      )
+      .join("");
+  } catch {
+    chartsEl.hidden = true;
+  }
+};
+
+chartsEl.addEventListener("change", async () => {
+  const pick = chartsEl.value;
+  chartParam = pick === ownChartId ? null : pick;
+  const url = chartParam ? `/graph?chart=${encodeURIComponent(chartParam)}` : "/graph";
+  state = await fetch(url).then((r) => r.json());
+  selectedId = null;
+  userMovedView = false;
+  draw();
+  // Only the live chart streams; a historical one is a static snapshot.
+  if (!chartParam) connect();
+  else if (es) es.close();
+  dot.classList.toggle("live", !chartParam);
+  dot.title = chartParam ? "read-only snapshot" : "live";
+});
+
+const boot = async () => {
+  const savedWidth = Number(store.get("node-width", 0));
+  const config = await fetch("/config")
+    .then((r) => r.json())
+    .catch(() => ({}));
+  applyThemeOverrides(config);
+  if (savedWidth) theme = resolveTheme(theme, { card: { width: savedWidth } });
+  widthEl.value = String(theme.card.width);
+
   fetch("/whoami")
     .then((r) => r.json())
     .then((w) => {
-      const el = document.getElementById("proj-name");
+      const el = $("proj-name");
       el.textContent = w.project;
       el.title = `${w.projectDir}\nport ${w.port}`;
       el.hidden = false;
+      ownChartId = w.chartId;
       document.title = `${w.project} · skym`;
     })
     .catch(() => {});
 
-  const saved = localStorage.getItem("skym-theme");
-  if (saved) document.documentElement.setAttribute("data-theme", saved);
-  initMermaid();
-  applyWidth();
-  syncInlineBtn();
+  syncFigBtn();
   renderLegend();
   refreshCharts();
   setInterval(refreshCharts, 5000);
   connect();
-})();
+};
+
+boot();

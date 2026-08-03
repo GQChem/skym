@@ -1,29 +1,46 @@
 import { randomUUID } from "node:crypto";
 import fs from "node:fs";
+import os from "node:os";
 import path from "node:path";
+import { writeOfflineHtml } from "./offline.js";
+import {
+  SCHEMA_VERSION,
+  apply as applyOp,
+  decodeLog,
+  encodeLog,
+  migrateGraphToLog,
+  replay,
+  type Entry,
+  type Op,
+} from "./ops.js";
 
-export type NodeKind = "action" | "result" | "options";
+export type NodeKind = "action" | "result" | "options" | "note";
 
 /** Actions carry progress; results carry quality; options are a fork with unexplored branches. */
 export type ActionState = "planned" | "exploring" | "waiting" | "done" | "abandoned" | "blocked";
 export type ResultState = "good" | "bad" | "mixed" | "inconclusive";
 export type OptionsState = "open" | "resolved";
-export type NodeState = ActionState | ResultState | OptionsState;
+/** A note is standing context: it holds while it is true, then stops. */
+export type NoteState = "active" | "retired";
+export type NodeState = ActionState | ResultState | OptionsState | NoteState;
 
 export const ACTION_STATES: ActionState[] = ["planned", "exploring", "waiting", "done", "abandoned", "blocked"];
 export const RESULT_STATES: ResultState[] = ["good", "bad", "mixed", "inconclusive"];
 export const OPTIONS_STATES: OptionsState[] = ["open", "resolved"];
+export const NOTE_STATES: NoteState[] = ["active", "retired"];
 
 export const STATES_FOR: Record<NodeKind, readonly NodeState[]> = {
   action: ACTION_STATES,
   result: RESULT_STATES,
   options: OPTIONS_STATES,
+  note: NOTE_STATES,
 };
 
 export const DEFAULT_STATE: Record<NodeKind, NodeState> = {
   action: "planned",
   result: "inconclusive",
   options: "open",
+  note: "active",
 };
 
 export type Direction = "TD" | "LR" | "BT" | "RL";
@@ -77,6 +94,79 @@ export interface Graph {
 
 const MAX_EVENTS = 300;
 
+/**
+ * A lock untouched for this long is treated as abandoned. A live server
+ * refreshes it on every commit and on a timer, so the window only has to
+ * outlast an idle gap between tool calls — not a whole session.
+ */
+const LOCK_STALE_MS = 90_000;
+
+/** How often a live holder proves it is still there. */
+const LOCK_HEARTBEAT_MS = 20_000;
+
+/**
+ * Identifies this boot, so a lock written before the last restart is never
+ * mistaken for a live one when the OS recycles its pid. Rounded to the minute
+ * and computed once, since uptime drifts by a second between calls.
+ */
+const BOOT_ID = String(Math.floor((Date.now() / 1000 - os.uptime()) / 60));
+
+function bootId(): string {
+  return BOOT_ID;
+}
+
+/** Coalesce window for regenerating the offline export. */
+const OFFLINE_DEBOUNCE_MS = 400;
+
+/**
+ * Ceilings, not capacity limits. A chart past this size has stopped being a
+ * readable exploration and become a dump — the honest fix is to summarise a
+ * branch or start a new chart, which the error says.
+ */
+const MAX_NODES = 300;
+const MAX_EDGES = 900;
+
+/**
+ * Reads a chart in either format.
+ *
+ * v2 stores `{ v, graph }` beside an append-only `log.jsonl`. v1 stored the
+ * bare graph with no version field. A v1 chart is read as-is and its log is
+ * reconstructed on first write, so charts written before the log existed keep
+ * opening — losing a user's history to a format change is not acceptable.
+ */
+export function readChartAt(chartDir: string): Graph | null {
+  const snapshotPath = path.join(chartDir, "graph.json");
+  let graph: Graph | null = null;
+
+  try {
+    const raw = JSON.parse(fs.readFileSync(snapshotPath, "utf8"));
+    if (raw && typeof raw === "object" && "graph" in raw && Array.isArray(raw.graph?.nodes)) {
+      graph = raw.graph as Graph; // v2
+    } else if (raw && Array.isArray(raw.nodes) && Array.isArray(raw.edges)) {
+      graph = raw as Graph; // v1
+    }
+  } catch {
+    // Missing or corrupt snapshot — the log may still hold everything.
+  }
+
+  // The log outranks the snapshot: if a crash lost the snapshot write but the
+  // append landed, replaying recovers the newer state.
+  try {
+    const entries = decodeLog(fs.readFileSync(path.join(chartDir, "log.jsonl"), "utf8"));
+    const last = entries.at(-1);
+    if (last && (!graph || last.seq > graph.revision)) {
+      graph = replay(entries, undefined, graph?.chartId ?? path.basename(chartDir), graph?.title ?? "Untitled");
+    }
+  } catch {
+    // No log (v1, or never written).
+  }
+
+  if (!graph) return null;
+  graph.events ??= [];
+  graph.revision ??= 0;
+  return graph;
+}
+
 function emptyGraph(chartId: string, title: string): Graph {
   const now = Date.now();
   return {
@@ -113,8 +203,18 @@ export class GraphStore {
   root: string;
   /** Doubles as the chart's directory name; re-slugged from the title on init. */
   chartId: string;
-  /** Lock owner token, unique per store instance rather than per process. */
-  private readonly owner = `${process.pid}:${randomUUID().slice(0, 8)}`;
+  /**
+   * Lock owner token, unique per store instance rather than per process. The
+   * start time disambiguates a recycled pid: the OS reuses pid numbers, so
+   * "some process has this pid" is not "the process that wrote this is alive".
+   */
+  private readonly owner = `${process.pid}:${bootId()}:${randomUUID().slice(0, 8)}`;
+
+  private heartbeat: ReturnType<typeof setInterval> | null = null;
+  private offlineTimer: ReturnType<typeof setTimeout> | null = null;
+
+  /** Stamped on every op. The team tier replaces this with a real identity. */
+  author = "local";
 
   constructor(root: string, chartId: string, title: string) {
     this.root = root;
@@ -126,6 +226,16 @@ export class GraphStore {
 
   /** Advisory lock released on shutdown so the chart can be resumed later. */
   release(): void {
+    if (this.heartbeat) {
+      clearInterval(this.heartbeat);
+      this.heartbeat = null;
+    }
+    // A pending export would otherwise be lost when the process exits.
+    if (this.offlineTimer) {
+      clearTimeout(this.offlineTimer);
+      this.offlineTimer = null;
+      this.flushOfflineHtml();
+    }
     try {
       fs.rmSync(this.lockPath(this.chartId), { force: true });
     } catch {
@@ -146,24 +256,51 @@ export class GraphStore {
   }
 
   private load(): Graph | null {
-    try {
-      const parsed = JSON.parse(fs.readFileSync(this.statePath, "utf8")) as Graph;
-      if (parsed && Array.isArray(parsed.nodes) && Array.isArray(parsed.edges)) {
-        parsed.events ??= [];
-        parsed.revision ??= 0;
-        return parsed;
-      }
-    } catch {
-      // No usable prior state.
-    }
-    return null;
+    return readChartAt(this.chartDir);
   }
 
-  private persist(): void {
+  private get logPath(): string {
+    return path.join(this.chartDir, "log.jsonl");
+  }
+
+  /**
+   * Appends the op, then writes the snapshot. The log is the source of truth —
+   * a snapshot lost or corrupted is rebuilt by replaying it.
+   */
+  private persist(entry: Entry): void {
+    // A chart dir deleted underneath a running server used to crash the write.
+    fs.mkdirSync(this.chartDir, { recursive: true });
+    fs.appendFileSync(this.logPath, `${JSON.stringify(entry)}\n`, "utf8");
+
+    const snapshot = { v: SCHEMA_VERSION, graph: this.graph };
     const tmp = `${this.statePath}.tmp`;
-    fs.writeFileSync(tmp, JSON.stringify(this.graph, null, 2), "utf8");
+    fs.writeFileSync(tmp, JSON.stringify(snapshot, null, 2), "utf8");
     fs.renameSync(tmp, this.statePath);
     this.writeIndex();
+    this.scheduleOfflineHtml();
+  }
+
+  /**
+   * Regenerating the export is the most expensive part of a commit and nothing
+   * waits on it, so it is coalesced onto a timer rather than run per mutation.
+   * A burst of tool calls then costs one render instead of one each.
+   */
+  private scheduleOfflineHtml(): void {
+    if (this.offlineTimer) return;
+    this.offlineTimer = setTimeout(() => {
+      this.offlineTimer = null;
+      this.flushOfflineHtml();
+    }, OFFLINE_DEBOUNCE_MS);
+    this.offlineTimer.unref?.();
+  }
+
+  /** Writes the export now; called on shutdown so nothing is left pending. */
+  flushOfflineHtml(): void {
+    try {
+      writeOfflineHtml(this.graph, this.chartDir, this.assetsDir);
+    } catch {
+      // The export is derived; failing to write it must not break a tool call.
+    }
   }
 
   /** Index lets the viewer list every chat's chart without opening each one. */
@@ -203,13 +340,7 @@ export class GraphStore {
   /** Reads another chat's chart read-only, for the viewer's chart switcher. */
   readChart(chartId: string): Graph | null {
     if (chartId === this.chartId) return this.graph;
-    try {
-      return JSON.parse(
-        fs.readFileSync(path.join(this.root, "charts", chartId, "graph.json"), "utf8"),
-      ) as Graph;
-    } catch {
-      return null;
-    }
+    return this.readGraphAt(chartId);
   }
 
   get(): Graph {
@@ -221,14 +352,17 @@ export class GraphStore {
     return () => this.listeners.delete(fn);
   }
 
-  private commit(kind: string, detail: string): Graph {
-    this.graph.revision += 1;
-    this.graph.updatedAt = Date.now();
-    this.graph.events.push({ at: this.graph.updatedAt, kind, detail });
-    if (this.graph.events.length > MAX_EVENTS) {
-      this.graph.events = this.graph.events.slice(-MAX_EVENTS);
-    }
-    this.persist();
+  /** The only way the graph changes: build an op, apply it, append it. */
+  private commit(op: Op): Graph {
+    const entry: Entry = {
+      seq: this.graph.revision + 1,
+      at: Date.now(),
+      by: this.author,
+      op,
+    };
+    applyOp(this.graph, entry);
+    this.persist(entry);
+    this.touchLock();
     for (const fn of this.listeners) {
       try {
         fn(this.graph);
@@ -261,36 +395,42 @@ export class GraphStore {
 
     this.chartId = target;
     fs.mkdirSync(this.assetsDir, { recursive: true });
+    this.startHeartbeat();
 
     if (existing) {
       this.graph = existing;
       this.graph.chartId = target;
-      this.graph.title = title;
-      if (description !== undefined) this.graph.description = description;
-      this.graph.direction = direction;
-      return { graph: this.commit("resume", `${title} (${this.graph.nodes.length} nodes)`), resumed: true };
+      this.backfillLog();
+      return {
+        graph: this.commit({ t: "meta", title, description, direction }),
+        resumed: true,
+      };
     }
 
     this.graph = emptyGraph(target, title);
-    this.graph.description = description;
-    this.graph.direction = direction;
-    return { graph: this.commit("init", title), resumed: false };
+    return { graph: this.commit({ t: "init", title, description, direction }), resumed: false };
+  }
+
+  /**
+   * A chart written before the log existed has history only in its snapshot.
+   * Reconstructing the log from it on first write means a v1 chart keeps its
+   * past instead of appearing to start at whatever op comes next.
+   */
+  private backfillLog(): void {
+    if (fs.existsSync(this.logPath)) return;
+    try {
+      fs.mkdirSync(this.chartDir, { recursive: true });
+      const entries = migrateGraphToLog(this.graph);
+      fs.writeFileSync(this.logPath, encodeLog(entries), "utf8");
+      // Continue numbering past the reconstructed history.
+      this.graph.revision = entries.length;
+    } catch {
+      // Migration is best effort; the snapshot still opens.
+    }
   }
 
   private readGraphAt(chartId: string): Graph | null {
-    try {
-      const g = JSON.parse(
-        fs.readFileSync(path.join(this.root, "charts", chartId, "graph.json"), "utf8"),
-      ) as Graph;
-      if (g && Array.isArray(g.nodes) && Array.isArray(g.edges)) {
-        g.events ??= [];
-        g.revision ??= 0;
-        return g;
-      }
-    } catch {
-      // Nothing to resume.
-    }
-    return null;
+    return readChartAt(path.join(this.root, "charts", chartId));
   }
 
   /**
@@ -373,16 +513,61 @@ export class GraphStore {
     return path.join(this.root, "charts", chartId, ".lock");
   }
 
+  /**
+   * A live holder touches its lock on every commit. A lock that has not been
+   * touched in far longer than that belongs to a process that died without
+   * releasing it, whatever pid it claims.
+   */
+  private lockIsFresh(chartId: string): boolean {
+    try {
+      const age = Date.now() - fs.statSync(this.lockPath(chartId)).mtimeMs;
+      return age < LOCK_STALE_MS;
+    } catch {
+      return false;
+    }
+  }
+
+  /** Keeps this store's own lock warm so others can tell it is still alive. */
+  private touchLock(): void {
+    try {
+      const now = new Date();
+      fs.utimesSync(this.lockPath(this.chartId), now, now);
+    } catch {
+      // The lock may not exist yet during init; nothing to keep warm.
+    }
+  }
+
+  /**
+   * An idle session is still a live one, so the lock is refreshed on a timer
+   * as well as on commit. Unref'd: this must never hold the process open.
+   */
+  private startHeartbeat(): void {
+    if (this.heartbeat) return;
+    this.heartbeat = setInterval(() => this.touchLock(), LOCK_HEARTBEAT_MS);
+    this.heartbeat.unref?.();
+  }
+
   private isLocked(chartId: string): boolean {
     try {
       const raw = fs.readFileSync(this.lockPath(chartId), "utf8").trim();
-      // Owner is "<pid>:<store>" so sibling stores in one process still see
-      // each other's locks; only this exact store may re-adopt its own.
+      // Owner is "<pid>:<boot>:<store>" so sibling stores in one process still
+      // see each other's locks; only this exact store may re-adopt its own.
       if (raw === this.owner) return false;
-      const pid = Number(raw.split(":")[0]);
+      const [pidPart, bootPart] = raw.split(":");
+      const pid = Number(pidPart);
       if (!pid) return false;
-      process.kill(pid, 0); // Throws if that process is gone.
-      return true;
+      try {
+        process.kill(pid, 0); // Throws if no process holds this pid.
+      } catch {
+        return false;
+      }
+      // A lock from an earlier boot cannot belong to a live process, whatever
+      // pid it claims.
+      if (bootPart && bootPart !== bootId()) return false;
+      // Same boot: the holder proves liveness by keeping the lock warm. A pid
+      // check alone is not enough — pids are recycled, and a recycled pid used
+      // to strand the chart, forking it to "-2" and losing the user's history.
+      return this.lockIsFresh(chartId);
     } catch {
       return false;
     }
@@ -428,6 +613,7 @@ export class GraphStore {
     return this.graph.nodes.find((n) => n.id === id);
   }
 
+  /** Mutations describe themselves as ops; ops.apply does the work. */
   upsertNode(input: {
     id: string;
     title?: string;
@@ -436,70 +622,106 @@ export class GraphStore {
     bullets?: string[];
     group?: string;
   }): Graph {
-    const now = Date.now();
-    const existing = this.findNode(input.id);
-    if (existing) {
-      if (input.title !== undefined) existing.title = input.title;
-      if (input.kind !== undefined) existing.kind = input.kind;
-      if (input.state !== undefined) existing.state = input.state;
-      if (input.bullets !== undefined) existing.bullets = input.bullets;
-      if (input.group !== undefined) existing.group = input.group;
-      existing.updatedAt = now;
-      return this.commit("node.update", input.id);
+    // Only a new node counts against the ceiling; updates are always allowed,
+    // or a full chart could not be corrected.
+    if (!this.findNode(input.id) && this.graph.nodes.length >= MAX_NODES) {
+      throw new Error(
+        `This chart already has ${MAX_NODES} nodes, which is past what stays readable. ` +
+          `Summarise a finished branch into one result node, or start a new chart with flow_init.`,
+      );
     }
-    const kind = input.kind ?? "action";
-    this.graph.nodes.push({
-      id: input.id,
-      title: input.title ?? input.id,
-      kind,
-      state: input.state ?? DEFAULT_STATE[kind],
-      bullets: input.bullets ?? [],
-      group: input.group,
-      figures: [],
-      createdAt: now,
-      updatedAt: now,
-    });
-    return this.commit("node.add", `${kind}:${input.id}`);
+    return this.commit({ t: "node.put", ...input });
   }
 
   removeNode(id: string): Graph {
-    this.graph.nodes = this.graph.nodes.filter((n) => n.id !== id);
-    this.graph.edges = this.graph.edges.filter((e) => e.from !== id && e.to !== id);
-    return this.commit("node.remove", id);
+    return this.commit({ t: "node.del", id });
   }
 
   addEdge(from: string, to: string, label?: string, dashed = false): Graph {
-    const dupe = this.graph.edges.find(
-      (e) => e.from === from && e.to === to && (e.label ?? "") === (label ?? ""),
-    );
-    if (dupe) {
-      dupe.dashed = dashed;
-      return this.commit("edge.update", `${from}->${to}`);
+    this.assertEdgeIsSane(from, to);
+    return this.commit({ t: "edge.put", id: randomUUID(), from, to, label, dashed });
+  }
+
+  /**
+   * A cycle in an exploration chart is almost always a mistake — the tree
+   * records what followed what, so a loop says work caused itself. Layout also
+   * has to break the cycle arbitrarily to rank nodes, which reads as scrambled.
+   */
+  private assertEdgeIsSane(from: string, to: string): void {
+    const duplicate = this.graph.edges.some((e) => e.from === from && e.to === to);
+    if (!duplicate && this.graph.edges.length >= MAX_EDGES) {
+      throw new Error(`This chart already has ${MAX_EDGES} edges. Summarise a branch or start a new chart.`);
     }
-    this.graph.edges.push({ id: randomUUID(), from, to, label, dashed });
-    return this.commit("edge.add", `${from}->${to}`);
+    if (from === to) {
+      throw new Error(
+        `Cannot link "${from}" to itself. If the work repeated, add a new node for the second attempt.`,
+      );
+    }
+    const path = this.pathBetween(to, from);
+    if (path) {
+      throw new Error(
+        `Adding ${from} → ${to} would create a cycle: ${path.join(" → ")} → ${to}. ` +
+          `An exploration chart reads as a tree, so add a new node for the later attempt instead of looping back.`,
+      );
+    }
+  }
+
+  /** Walks forward from `start`, returning the route to `goal` if one exists. */
+  private pathBetween(start: string, goal: string): string[] | null {
+    const outgoing = new Map<string, string[]>();
+    for (const e of this.graph.edges) {
+      const list = outgoing.get(e.from) ?? [];
+      list.push(e.to);
+      outgoing.set(e.from, list);
+    }
+    const seen = new Set<string>();
+    const walk = (at: string, trail: string[]): string[] | null => {
+      if (at === goal) return trail;
+      if (seen.has(at)) return null;
+      seen.add(at);
+      for (const next of outgoing.get(at) ?? []) {
+        const found = walk(next, [...trail, next]);
+        if (found) return found;
+      }
+      return null;
+    };
+    return walk(start, [start]);
   }
 
   removeEdge(from: string, to: string): Graph {
-    this.graph.edges = this.graph.edges.filter((e) => !(e.from === from && e.to === to));
-    return this.commit("edge.remove", `${from}->${to}`);
+    return this.commit({ t: "edge.del", from, to });
   }
 
   setState(id: string, state: NodeState): Graph {
-    const node = this.findNode(id);
-    if (!node) throw new Error(`No node with id "${id}".`);
-    node.state = state;
-    node.updatedAt = Date.now();
-    return this.commit("node.state", `${id}=${state}`);
+    if (!this.findNode(id)) throw new Error(`No node with id "${id}".`);
+    return this.commit({ t: "node.state", id, state });
   }
 
-  attachFigure(nodeId: string, data: Buffer, mime: string, caption?: string, ext = "png"): Graph {
+  attachFigure(
+    nodeId: string,
+    data: Buffer,
+    mime: string,
+    caption?: string,
+    ext = "png",
+    replace = false,
+  ): Graph {
     const node = this.findNode(nodeId);
     if (!node) throw new Error(`No node with id "${nodeId}".`);
     const file = `${nodeId.replace(/[^a-zA-Z0-9_-]/g, "_")}-${Date.now()}.${ext}`;
+    fs.mkdirSync(this.assetsDir, { recursive: true });
     fs.writeFileSync(path.join(this.assetsDir, file), data);
-    node.figures.push({ id: randomUUID(), file, caption, mime });
-    node.updatedAt = Date.now();
-    return this.commit("figure.add", `${nodeId}:${file}`);
+    if (replace) {
+      // Drop the asset files too, or a corrected figure leaves the broken one
+      // orphaned on disk.
+      for (const old of node.figures) {
+        try {
+          fs.unlinkSync(path.join(this.assetsDir, old.file));
+        } catch {
+          // already gone; the reference is what matters
+        }
+      }
+      this.commit({ t: "figure.clear", nodeId });
+    }
+    return this.commit({ t: "figure.add", nodeId, figure: { id: randomUUID(), file, caption, mime } });
   }
 }
