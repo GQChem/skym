@@ -121,7 +121,3 @@ Any subset works; unspecified values fall through. Note that state colours were 
 | `SKYM_STATE_DIR` | `<project>/.flows` | Override the chart location entirely. |
 | `SKYM_CHART_ID` | slug of title | Pin a chart directory, e.g. to resume one. |
 | `SKYM_NO_OPEN` | unset | Set to `1` to never auto-open a browser. |
-
-## Practical points
-
-When displaying the chart in a browser page, do NOT open http://127.0.0.1:7373/chart?... because it loads a static page without figures. Instead DO OPEN http://127.0.0.1:7373/. Replace the port if needed.

@@ -8,7 +8,8 @@ dist/
 .flows/charts/*/assets/
 .flows/charts/*/.lock
 
-# Renderer spike scratch output
+# Screenshot output from scripts/shoot.mjs
+live.png
 spike-*.html
 spike-*.png
 

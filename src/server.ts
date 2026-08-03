@@ -84,6 +84,14 @@ export async function startViewer(
       return;
     }
 
+    // An earlier build served a static /chart page. Redirect rather than 404:
+    // the URL is in old links and tool output, and "/" is what it wanted.
+    if (pathname === "/chart") {
+      const chart = url.searchParams.get("chart");
+      res.writeHead(302, { Location: chart ? `/?chart=${encodeURIComponent(chart)}` : "/" }).end();
+      return;
+    }
+
     if (pathname === "/charts") {
       res.writeHead(200, { "Content-Type": "application/json; charset=utf-8" });
       res.end(JSON.stringify(store.listCharts()));

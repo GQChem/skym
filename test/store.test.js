@@ -309,3 +309,43 @@ test("the node ceiling rejects new nodes but still allows updates", () => {
   assert.equal(s.get().nodes.find((n) => n.id === "n0").title, "Renamed");
   s.release();
 });
+
+test("the offline export inlines every figure and references nothing external", () => {
+  const root = tmp();
+  const s = mk(root);
+  s.init("Portable");
+  s.upsertNode({ id: "r", title: "Evidence", kind: "result", state: "good" });
+  s.attachFigure("r", Buffer.from("png bytes"), "image/png", "A png");
+  s.attachFigure("r", Buffer.from("<svg xmlns='http://www.w3.org/2000/svg'/>"), "image/svg+xml", "An svg", "svg");
+  s.flushOfflineHtml();
+
+  const html = fs.readFileSync(path.join(s.chartDir, "flow.html"), "utf8");
+  // Copying flow.html away from its assets/ directory must not break it.
+  assert.doesNotMatch(html, /(href|src)="\/?assets\//, "no path may point back at assets/");
+  assert.doesNotMatch(html, /(href|src)="https?:/, "nothing may be fetched over the network");
+
+  // Every figure reaches the panel data inlined; a lookup miss would leave "".
+  assert.match(html, /"src":"data:image\/png;base64,/);
+  assert.match(html, /"src":"data:image\/svg\+xml;base64,/);
+  assert.ok(!/"src":""/.test(html), "a figure that failed to inline leaves an empty src");
+
+  // The card draws the first figure, once per pre-rendered theme.
+  assert.equal((html.match(/<image[^>]+href="data:image\/png/g) || []).length, 2);
+  s.release();
+});
+
+test("a figure whose file vanished does not emit a broken reference", () => {
+  const root = tmp();
+  const s = mk(root);
+  s.init("Missing asset");
+  s.upsertNode({ id: "r", title: "Evidence", kind: "result", state: "good" });
+  s.attachFigure("r", Buffer.from("png bytes"), "image/png", "A png");
+  // Someone deleted assets/ but kept graph.json — the export must still open.
+  fs.rmSync(s.assetsDir, { recursive: true, force: true });
+  s.flushOfflineHtml();
+
+  const html = fs.readFileSync(path.join(s.chartDir, "flow.html"), "utf8");
+  assert.match(html, /^<!doctype html>/, "the export must still be written");
+  assert.doesNotMatch(html, /(href|src)="\/?assets\//, "must not fall back to a path that cannot resolve");
+  s.release();
+});
