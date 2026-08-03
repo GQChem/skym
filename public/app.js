@@ -35,7 +35,7 @@ let mode = store.get("theme", matchMedia("(prefers-color-scheme: dark)").matches
 let view = { x: 0, y: 0, k: 1 };
 let userMovedView = false;
 /** Detail currently drawn; re-layout only when the zoom crosses a threshold. */
-let detail = "full";
+let detailLevel = "full";
 /** "auto" follows zoom; the other values pin a level from the toolbar. */
 let detailMode = store.get("detail", "auto");
 
@@ -82,7 +82,7 @@ let refitting = false;
 const fit = () => {
   fitOnce();
   if (refitting || detailMode !== "auto" || !state) return;
-  if (detailForZoom(view.k) !== detail) {
+  if (detailForZoom(view.k) !== detailLevel) {
     refitting = true;
     try {
       draw();
@@ -111,8 +111,8 @@ const draw = () => {
     return;
   }
 
-  detail = detailMode === "auto" ? detailForZoom(view.k) : detailMode;
-  lastLayout = layoutGraph(graph, theme, dagre, showFigures, detail);
+  detailLevel = detailMode === "auto" ? detailForZoom(view.k) : detailMode;
+  lastLayout = layoutGraph(graph, theme, dagre, showFigures, detailLevel);
   canvas.innerHTML = renderSvg(lastLayout, {
     theme,
     palette: paletteFor(theme, mode),
@@ -392,7 +392,7 @@ stage.addEventListener(
 const maybeRelayout = () => {
   if (detailMode !== "auto" || !state || !lastLayout) return;
   const next = detailForZoom(view.k);
-  if (next === detail) return;
+  if (next === detailLevel) return;
 
   const cx = (stage.clientWidth / 2 - view.x) / view.k / lastLayout.width;
   const cy = (stage.clientHeight / 2 - view.y) / view.k / lastLayout.height;
@@ -422,7 +422,7 @@ widthEl.addEventListener("input", () => {
   draw();
 });
 
-const detailEl = $("detail");
+const detailEl = $("detail-level");
 detailEl.value = detailMode;
 
 detailEl.addEventListener("change", () => {

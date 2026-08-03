@@ -114,17 +114,19 @@ function truncateToWidth(text: string, size: number, maxWidth: number, weight = 
 }
 
 /**
- * How much of a card is worth drawing. Below roughly 55% zoom bullet text is
- * illegible, so rendering it only makes cards large and the graph sparse —
- * shedding detail lets more structure fit on screen instead.
+ * How much of a card is worth drawing. Bullets are the small print: they go
+ * illegible well before the title does, and they carry most of a card's height,
+ * so dropping them is what actually buys screen space.
+ *
+ * There is no title-only level. Zoomed out far enough for a figure to be worth
+ * hiding, the title is already too small to read, so the level bought nothing —
+ * and the Figures toggle already covers hiding figures deliberately.
  */
-export type Detail = "full" | "compact" | "title";
+export type Detail = "full" | "compact";
 
-/** Zoom thresholds for automatic detail selection. */
+/** Zoom threshold for automatic detail selection. */
 export function detailForZoom(k: number): Detail {
-  if (k < 0.3) return "title";
-  if (k < 0.55) return "compact";
-  return "full";
+  return k < 0.62 ? "compact" : "full";
 }
 
 /**
@@ -173,9 +175,9 @@ export function measureNode(
     }
   }
 
-  // A figure still reads as a shape when its labels do not, so it survives one
-  // step longer than the bullets; at title level nothing but the headline is left.
-  const wantFigure = showFigures && detail !== "title";
+  // Figures survive every detail level: a chart still reads as a shape when its
+  // labels do not, and the Figures toggle is how they get hidden on purpose.
+  const wantFigure = showFigures;
 
   const metaH = type.metaSize + 7;
   const titleH = titleLines.length * type.titleLeading;

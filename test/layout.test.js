@@ -248,12 +248,12 @@ test("a figure holds the card open at the ceiling", () => {
 
 test("detail level follows zoom", () => {
   assert.equal(detailForZoom(1), "full");
-  assert.equal(detailForZoom(0.6), "full");
-  assert.equal(detailForZoom(0.4), "compact");
-  assert.equal(detailForZoom(0.2), "title");
+  assert.equal(detailForZoom(0.7), "full");
+  assert.equal(detailForZoom(0.5), "compact");
+  assert.equal(detailForZoom(0.2), "compact");
 });
 
-test("compact drops bullets, title drops the figure too", () => {
+test("compact drops bullets but keeps the figure", () => {
   const n = node({
     title: "A node",
     bullets: ["one", "two", "three"],
@@ -261,21 +261,23 @@ test("compact drops bullets, title drops the figure too", () => {
   });
   const full = measureNode(n, DEFAULT_THEME, true, "full");
   const compact = measureNode(n, DEFAULT_THEME, true, "compact");
-  const title = measureNode(n, DEFAULT_THEME, true, "title");
 
   assert.ok(full.bulletLines.length > 0);
   assert.equal(compact.bulletLines.length, 0, "compact should drop bullets");
-  assert.equal(title.bulletLines.length, 0);
-
-  assert.ok(compact.figure, "compact keeps the figure — shape reads when text does not");
-  assert.equal(title.figure, undefined, "title level shows only the headline");
-
+  assert.ok(compact.figure, "the Figures toggle hides figures, not the zoom level");
   assert.ok(full.h > compact.h, "shedding bullets must shrink the card");
-  assert.ok(compact.h > title.h, "shedding the figure must shrink it further");
+});
+
+test("the Figures toggle still governs figures at every level", () => {
+  const n = node({ figures: [{ id: "f", file: "a.png", mime: "image/png" }] });
+  for (const d of ["full", "compact"]) {
+    assert.ok(measureNode(n, DEFAULT_THEME, true, d).figure, d + " should show it");
+    assert.equal(measureNode(n, DEFAULT_THEME, false, d).figure, undefined, d + " should hide it");
+  }
 });
 
 test("the title survives every detail level", () => {
-  for (const d of ["full", "compact", "title"]) {
+  for (const d of ["full", "compact"]) {
     const m = measureNode(node({ title: "Keep me" }), DEFAULT_THEME, false, d);
     assert.ok(m.titleLines.join(" ").includes("Keep me"), `${d} lost the title`);
   }
@@ -291,6 +293,6 @@ test("lower detail makes the whole graph smaller", () => {
   ];
   const g = graph(nodes, edges);
   const full = layoutGraph(g, DEFAULT_THEME, dagre, false, "full");
-  const title = layoutGraph(g, DEFAULT_THEME, dagre, false, "title");
-  assert.ok(title.height < full.height, "title level should be more compact");
+  const compact = layoutGraph(g, DEFAULT_THEME, dagre, false, "compact");
+  assert.ok(compact.height < full.height, "dropping bullets should compact the graph");
 });
