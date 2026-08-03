@@ -18,6 +18,7 @@ test("init slugs the directory from the title", () => {
   const root = tmp();
   const s = mk(root);
   s.init("Fix the Auth Redirect!");
+  s.flushOfflineHtml();
   assert.equal(s.chartId, "fix-the-auth-redirect");
   assert.ok(fs.existsSync(path.join(root, "charts", "fix-the-auth-redirect", "graph.json")));
   assert.ok(fs.existsSync(path.join(root, "charts", "fix-the-auth-redirect", "flow.html")));
@@ -30,6 +31,7 @@ test("offline HTML is self-contained and refreshed with graph and figures", () =
   s.upsertNode({ id: "result", title: "Portable result", kind: "result", state: "good", bullets: ["Stored inline"] });
   s.attachFigure("result", Buffer.from("image bytes"), "image/png", "Evidence");
 
+  s.flushOfflineHtml();
   const file = path.join(s.chartDir, "flow.html");
   const html = fs.readFileSync(file, "utf8");
   assert.match(html, /^<!doctype html>/);

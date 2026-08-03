@@ -270,7 +270,14 @@ test("charts persist under .flows with a slugged directory", async () => {
     const dir = path.join(s.root, "charts", "my-great-chart");
     assert.ok(fs.existsSync(path.join(dir, "graph.json")));
     const saved = JSON.parse(fs.readFileSync(path.join(dir, "graph.json"), "utf8"));
-    assert.equal(saved.title, "My Great Chart!");
+    // v2: the snapshot is versioned, so the graph sits under a `graph` key.
+    assert.equal(saved.v, 2);
+    assert.equal(saved.graph.title, "My Great Chart!");
+
+    // Every mutation is also appended to the log the team tier will ship.
+    const log = fs.readFileSync(path.join(dir, "log.jsonl"), "utf8").trim().split("\n");
+    assert.equal(log.length, 1);
+    assert.equal(JSON.parse(log[0]).op.t, "init");
   } finally {
     await s.client.close();
   }
