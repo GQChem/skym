@@ -3,6 +3,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { writeOfflineHtml } from "./offline.js";
+import { checkEdge, checkNodeCeiling } from "./validate.js";
 import {
   SCHEMA_VERSION,
   apply as applyOp,
@@ -102,8 +103,6 @@ const OFFLINE_DEBOUNCE_MS = 400;
  * readable exploration and become a dump — the honest fix is to summarise a
  * branch or start a new chart, which the error says.
  */
-const MAX_NODES = 300;
-const MAX_EDGES = 900;
 
 /**
  * Reads a chart in either format.
@@ -176,7 +175,7 @@ export interface ChartSummary {
  */
 export class GraphStore {
   private graph: Graph;
-  private listeners = new Set<(g: Graph) => void>();
+  private listeners = new Set<(g: Graph, entry?: Entry) => void>();
 
   /** Where charts live; `flow_init` may repoint this per chart. */
   root: string;
@@ -326,7 +325,7 @@ export class GraphStore {
     return this.graph;
   }
 
-  subscribe(fn: (g: Graph) => void): () => void {
+  subscribe(fn: (g: Graph, entry?: Entry) => void): () => void {
     this.listeners.add(fn);
     return () => this.listeners.delete(fn);
   }
@@ -334,6 +333,7 @@ export class GraphStore {
   /** The only way the graph changes: build an op, apply it, append it. */
   private commit(op: Op): Graph {
     const entry: Entry = {
+      id: randomUUID(),
       seq: this.graph.revision + 1,
       at: Date.now(),
       by: this.author,
@@ -344,7 +344,9 @@ export class GraphStore {
     this.touchLock();
     for (const fn of this.listeners) {
       try {
-        fn(this.graph);
+        // The entry rides along so a sync client ships the op rather than
+        // diffing two graphs to work out what changed.
+        fn(this.graph, entry);
       } catch {
         // A broken viewer must not break the tool call.
       }
@@ -603,12 +605,7 @@ export class GraphStore {
   }): Graph {
     // Only a new node counts against the ceiling; updates are always allowed,
     // or a full chart could not be corrected.
-    if (!this.findNode(input.id) && this.graph.nodes.length >= MAX_NODES) {
-      throw new Error(
-        `This chart already has ${MAX_NODES} nodes, which is past what stays readable. ` +
-          `Summarise a finished branch into one result node, or start a new chart with flow_init.`,
-      );
-    }
+    checkNodeCeiling(this.graph, !this.findNode(input.id));
     return this.commit({ t: "node.put", ...input });
   }
 
@@ -617,54 +614,8 @@ export class GraphStore {
   }
 
   addEdge(from: string, to: string, label?: string, dashed = false): Graph {
-    this.assertEdgeIsSane(from, to);
+    checkEdge(this.graph, from, to);
     return this.commit({ t: "edge.put", id: randomUUID(), from, to, label, dashed });
-  }
-
-  /**
-   * A cycle in an exploration chart is almost always a mistake — the tree
-   * records what followed what, so a loop says work caused itself. Layout also
-   * has to break the cycle arbitrarily to rank nodes, which reads as scrambled.
-   */
-  private assertEdgeIsSane(from: string, to: string): void {
-    const duplicate = this.graph.edges.some((e) => e.from === from && e.to === to);
-    if (!duplicate && this.graph.edges.length >= MAX_EDGES) {
-      throw new Error(`This chart already has ${MAX_EDGES} edges. Summarise a branch or start a new chart.`);
-    }
-    if (from === to) {
-      throw new Error(
-        `Cannot link "${from}" to itself. If the work repeated, add a new node for the second attempt.`,
-      );
-    }
-    const path = this.pathBetween(to, from);
-    if (path) {
-      throw new Error(
-        `Adding ${from} → ${to} would create a cycle: ${path.join(" → ")} → ${to}. ` +
-          `An exploration chart reads as a tree, so add a new node for the later attempt instead of looping back.`,
-      );
-    }
-  }
-
-  /** Walks forward from `start`, returning the route to `goal` if one exists. */
-  private pathBetween(start: string, goal: string): string[] | null {
-    const outgoing = new Map<string, string[]>();
-    for (const e of this.graph.edges) {
-      const list = outgoing.get(e.from) ?? [];
-      list.push(e.to);
-      outgoing.set(e.from, list);
-    }
-    const seen = new Set<string>();
-    const walk = (at: string, trail: string[]): string[] | null => {
-      if (at === goal) return trail;
-      if (seen.has(at)) return null;
-      seen.add(at);
-      for (const next of outgoing.get(at) ?? []) {
-        const found = walk(next, [...trail, next]);
-        if (found) return found;
-      }
-      return null;
-    };
-    return walk(start, [start]);
   }
 
   removeEdge(from: string, to: string): Graph {

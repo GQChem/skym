@@ -16,7 +16,8 @@ import { toMermaid } from "./mermaid.js";
 import { renderChart, validateChart } from "./chart.js";
 import { DEFAULT_THEME, paletteFor } from "./theme.js";
 import { loadConfig } from "./config.js";
-import { allStates, kindDef, openStates, statesFor, type KindDef } from "./vocab.js";
+import { allStates, kindDef, openStates, type KindDef } from "./vocab.js";
+import { checkBullets, checkState } from "./validate.js";
 import { startViewer, type Viewer } from "./server.js";
 
 const projectDir = process.env.SKYM_PROJECT_DIR ?? process.cwd();
@@ -34,7 +35,6 @@ const store = new GraphStore(root, chartId, "Untitled chart");
 // Tools are generated from this, so it must resolve before registration below.
 const config = loadConfig(projectDir);
 const vocab = config.vocab;
-const STATES_FOR = statesFor(vocab);
 const OPEN_STATES = openStates(vocab);
 let viewer: Viewer | null = null;
 let opened = false;
@@ -93,29 +93,10 @@ function resolveFolder(folder: string): string {
   return path.resolve(projectDir, folder);
 }
 
-function assertState(kind: NodeKind, state: string | undefined): NodeState | undefined {
-  if (state === undefined) return undefined;
-  const allowed = STATES_FOR[kind];
-  if (!allowed) throw new Error(`Unknown node kind "${kind}".`);
-  if (!allowed.includes(state)) {
-    throw new Error(`State "${state}" is not valid for a ${kind} node. Use one of: ${allowed.join(", ")}.`);
-  }
-  return state;
-}
+const assertState = (kind: NodeKind, state: string | undefined): NodeState | undefined =>
+  checkState(vocab, kind, state);
 
-/** Free-form prose in a bullet defeats the convention, so reject it early. */
-function validateBullets(bullets: string[] | undefined): void {
-  if (!bullets) return;
-  for (const b of bullets) {
-    if (b.length > 200) throw new Error(`Bullet too long (${b.length} chars, max 200): "${b.slice(0, 60)}…"`);
-    const sentences = b.split(/[.!?]\s+[A-Z]/).length;
-    if (sentences > 2) {
-      throw new Error(
-        `Bullet reads as prose, not a bullet: "${b.slice(0, 70)}…". Split it into separate short bullets.`,
-      );
-    }
-  }
-}
+const validateBullets = (bullets: string[] | undefined): void => checkBullets(bullets);
 
 server.registerTool(
   "flow_init",

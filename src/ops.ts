@@ -40,6 +40,13 @@ export type Op =
   | { t: "figure.clear"; nodeId: string };
 
 export interface Entry {
+  /**
+   * Stable identity, minted where the op originates. Delivery may repeat — a
+   * retried batch, a resumed sync — and figure.add appends rather than sets, so
+   * without this a redelivery duplicates figures and double-counts events.
+   * Optional: logs written before this existed replay unchanged.
+   */
+  id?: string;
   /** Monotonic per chart; also the graph's revision after applying this op. */
   seq: number;
   at: number;
@@ -199,11 +206,35 @@ export function apply(graph: Graph, entry: Entry): Graph {
   return graph;
 }
 
-/** Folds a whole log, optionally onto an existing snapshot. */
+/**
+ * Folds a whole log, optionally onto an existing snapshot. Entries carrying an
+ * id are applied once: a log that contains the same op twice — a retried sync,
+ * a log concatenated with itself — yields the same graph as one that does not.
+ */
 export function replay(entries: Entry[], base?: Graph, chartId = "chart", title = "Untitled"): Graph {
   const graph = base ?? emptyGraph(chartId, title, entries[0]?.at);
-  for (const e of entries) apply(graph, e);
+  const seen = new Set<string>();
+  for (const e of entries) {
+    if (e.id) {
+      if (seen.has(e.id)) continue;
+      seen.add(e.id);
+    }
+    apply(graph, e);
+  }
   return graph;
+}
+
+/** Drops entries already folded into a graph, for appending a synced batch. */
+export function dedupe(entries: Entry[], seen: Set<string>): Entry[] {
+  const out: Entry[] = [];
+  for (const e of entries) {
+    if (e.id) {
+      if (seen.has(e.id)) continue;
+      seen.add(e.id);
+    }
+    out.push(e);
+  }
+  return out;
 }
 
 /** One JSON object per line: appendable without rewriting, and greppable. */

@@ -259,3 +259,60 @@ test("events still distinguish an add from an update", () => {
   assert.ok(kinds.includes("node.update"));
   s.release();
 });
+
+// --- op identity: the property a remote relay depends on ---
+
+const idEntry = (id, seq, op, at = 1000 + seq) => ({ id, seq, at, by: "test", op });
+
+test("an entry delivered twice is applied once", () => {
+  const log = [
+    idEntry("i1", 1, { t: "init", title: "T", direction: "TD" }),
+    idEntry("i2", 2, { t: "node.put", id: "a", title: "A", kind: "result" }),
+    idEntry("i3", 3, { t: "figure.add", nodeId: "a", figure: { id: "f", file: "f.png", mime: "image/png" } }),
+  ];
+  const once = replay(log);
+  const twice = replay([...log, ...log]);
+  assert.deepEqual(twice, once, "redelivery must not change the graph");
+  assert.equal(twice.nodes[0].figures.length, 1, "figure.add must not duplicate on retry");
+});
+
+test("figures still duplicate without an id, which is why ids exist", () => {
+  // Guards the fix: the un-idded path is the old behaviour, kept for old logs.
+  const fig = { t: "figure.add", nodeId: "a", figure: { id: "f", file: "f.png", mime: "image/png" } };
+  const g = replay([
+    entry(1, { t: "init", title: "T", direction: "TD" }),
+    entry(2, { t: "node.put", id: "a", kind: "result" }),
+    entry(3, fig),
+    entry(4, fig),
+  ]);
+  assert.equal(g.nodes[0].figures.length, 2);
+});
+
+test("a log written before ids replays unchanged", () => {
+  const log = [
+    entry(1, { t: "init", title: "T", direction: "TD" }),
+    entry(2, { t: "node.put", id: "a", title: "A" }),
+  ];
+  const g = replay(log);
+  assert.equal(g.nodes.length, 1);
+  assert.equal(g.revision, 2);
+});
+
+test("ids survive the log encoding round trip", () => {
+  const log = [idEntry("i1", 1, { t: "init", title: "T", direction: "TD" })];
+  const back = decodeLog(encodeLog(log));
+  assert.equal(back[0].id, "i1");
+});
+
+test("the store stamps every op with a unique id", () => {
+  const root = tmp();
+  const s = mk(root);
+  s.init("Ids");
+  s.upsertNode({ id: "a", title: "A", kind: "action" });
+  s.upsertNode({ id: "b", title: "B", kind: "action" });
+  s.release();
+  const log = decodeLog(fs.readFileSync(path.join(root, "charts", "ids", "log.jsonl"), "utf8"));
+  const ids = log.map((e) => e.id);
+  assert.ok(ids.every(Boolean), "every entry should carry an id");
+  assert.equal(new Set(ids).size, ids.length, "ids must be unique");
+});
