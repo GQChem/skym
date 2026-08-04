@@ -95,8 +95,28 @@ const fit = () => {
 
 // --- rendering ---
 
+const fetchGraph = async (url) => {
+  try {
+    const r = await fetch(url);
+    const body = await r.json();
+    return r.ok ? body : { error: body?.error || `HTTP ${r.status}` };
+  } catch (err) {
+    return { error: String(err) };
+  }
+};
+
 const draw = () => {
   if (!state) return;
+  // An error body still parses as JSON, so check the shape before dereferencing.
+  if (!state.graph?.nodes) {
+    canvas.innerHTML = "";
+    lastLayout = null;
+    empty.hidden = false;
+    empty.querySelector("p").textContent = state.error
+      ? `Cannot load chart: ${state.error}`
+      : "No flowchart yet.";
+    return;
+  }
   const graph = state.graph;
   $("project").textContent = graph.title || "skym";
   $("rev").textContent = `rev ${graph.revision}`;
@@ -549,7 +569,7 @@ chartsEl.addEventListener("change", async () => {
   const pick = chartsEl.value;
   chartParam = pick === ownChartId ? null : pick;
   const url = chartParam ? `/graph?chart=${encodeURIComponent(chartParam)}` : "/graph";
-  state = await fetch(url).then((r) => r.json());
+  state = await fetchGraph(url);
   selectedId = null;
   userMovedView = false;
   draw();

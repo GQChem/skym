@@ -62,17 +62,20 @@ export async function startViewer(
 
     if (pathname === "/graph") {
       const want = url.searchParams.get("chart");
-      res.writeHead(200, { "Content-Type": "application/json; charset=utf-8" });
+      const json = { "Content-Type": "application/json; charset=utf-8" };
       if (want && want !== store.chartId) {
         // Another chat's chart: read-only snapshot, no live stream.
         const other = store.readChart(want);
-        res.end(
-          other
-            ? JSON.stringify({ graph: other, readOnly: true })
-            : JSON.stringify({ error: "no such chart" }),
-        );
+        if (!other) {
+          res.writeHead(404, json);
+          res.end(JSON.stringify({ error: "no such chart" }));
+          return;
+        }
+        res.writeHead(200, json);
+        res.end(JSON.stringify({ graph: other, readOnly: true }));
         return;
       }
+      res.writeHead(200, json);
       res.end(payload(store));
       return;
     }
