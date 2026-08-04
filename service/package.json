@@ -11,8 +11,7 @@
     "test": "npm run build && node --test \"test/*.test.js\""
   },
   "dependencies": {
-    "pg": "^8.13.0",
-    "skym-flow": "file:.."
+    "pg": "^8.13.0"
   },
   "devDependencies": {
     "@types/node": "^22.10.0",

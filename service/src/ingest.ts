@@ -1,9 +1,9 @@
 import type { PoolClient } from "pg";
 import type { Pool } from "./db.js";
 import { tx } from "./db.js";
-import { apply, emptyGraph, type Entry } from "skym-flow/ops";
-import type { Graph } from "skym-flow/store";
-import { checkBullets, checkEdge, checkNodeCeiling, ValidationError } from "skym-flow/validate";
+import { apply, emptyGraph, type Entry } from "../../dist/ops.js";
+import type { Graph } from "../../dist/store.js";
+import { checkBullets, checkEdge, checkNodeCeiling, ValidationError } from "../../dist/validate.js";
 
 export interface IngestResult {
   /** Ops actually written, in the order the server assigned. */

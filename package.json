@@ -24,8 +24,12 @@
     "public",
     "scripts"
   ],
+  "workspaces": [
+    "service"
+  ],
   "scripts": {
     "build": "tsc && node scripts/build-client.mjs",
+    "postbuild": "npm run build --workspace service --if-present",
     "dev": "tsc --watch",
     "start": "node dist/index.js",
     "test": "npm run build && node --test \"test/*.test.js\"",
