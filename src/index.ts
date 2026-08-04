@@ -2,7 +2,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import { randomUUID } from "node:crypto";
-import { spawn } from "node:child_process";
+import { execFileSync, spawn } from "node:child_process";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import { z } from "zod";
@@ -18,6 +18,14 @@ import { DEFAULT_THEME, paletteFor } from "./theme.js";
 import { loadConfig } from "./config.js";
 import { allStates, kindDef, openStates, type KindDef } from "./vocab.js";
 import { checkBullets, checkState } from "./validate.js";
+import {
+  SyncClient,
+  awaitPairing,
+  readCredentials,
+  startPairing,
+  writeCredentials,
+  type PairingPrompt,
+} from "./sync.js";
 import { startViewer, type Viewer } from "./server.js";
 
 const projectDir = process.env.SKYM_PROJECT_DIR ?? process.cwd();
@@ -38,6 +46,8 @@ const vocab = config.vocab;
 const OPEN_STATES = openStates(vocab);
 let viewer: Viewer | null = null;
 let opened = false;
+let sync: SyncClient | null = null;
+let pairingPrompt: PairingPrompt | null = null;
 
 function openBrowser(url: string): void {
   if (!autoOpen || opened) return;
@@ -55,9 +65,91 @@ function openBrowser(url: string): void {
   }
 }
 
+/**
+ * Connects the chart to the hosted service, if one is configured.
+ *
+ * Pairing is deliberately not awaited inside a tool call: the user has to
+ * approve in a browser, which can take a minute, and a tool that blocks that
+ * long reads as a hang. An unpaired agent gets instructions back instead, and
+ * the chart keeps working locally in the meantime.
+ */
+async function ensureSync(): Promise<string | null> {
+  if (!config.service || config.storage === "local") return null;
+  if (sync) return null;
+
+  const creds = readCredentials();
+  if (!creds || creds.url !== config.service) {
+    if (pairingPrompt) return pairingNotice(pairingPrompt);
+    try {
+      const prompt = await startPairing(config.service);
+      pairingPrompt = prompt;
+      openBrowser(prompt.verificationUri);
+      // Redeems in the background; the next tool call picks up the token.
+      void awaitPairing(config.service, prompt.deviceCode)
+        .then((token) => {
+          writeCredentials({ url: config.service!, token });
+          pairingPrompt = null;
+        })
+        .catch(() => {
+          pairingPrompt = null;
+        });
+      return pairingNotice(prompt);
+    } catch (err) {
+      return `Could not reach the skym service at ${config.service}: ${(err as Error).message}`;
+    }
+  }
+
+  const client = new SyncClient({
+    url: creds.url,
+    token: creds.token,
+    chartId: store.chartId,
+    onError: () => {
+      /* surfaced through summary(), not thrown into a tool call */
+    },
+  });
+  try {
+    await client.attach({
+      repoKey: repoKey(),
+      projectName: path.basename(projectDir),
+      slug: store.chartId,
+      title: store.get().title,
+    });
+  } catch (err) {
+    return `Chart is local only — the service rejected it: ${(err as Error).message}`;
+  }
+
+  sync = client;
+  // Ops are queued as they commit; the client drains on its own timer.
+  store.subscribe((_g, entry) => {
+    if (entry) client.enqueue(entry);
+  });
+  return null;
+}
+
+const pairingNotice = (p: PairingPrompt): string =>
+  `Connect this agent to skym: open ${p.verificationUri} and enter code ${p.userCode}\n` +
+  `The chart works locally meanwhile; it will sync once approved.`;
+
+/** Identifies the project so charts land under it without the user naming one. */
+function repoKey(): string | undefined {
+  try {
+    const url = execFileSync("git", ["remote", "get-url", "origin"], {
+      cwd: projectDir,
+      encoding: "utf8",
+      stdio: ["ignore", "pipe", "ignore"],
+    }).trim();
+    if (url) return url.replace(/\.git$/, "");
+  } catch {
+    // Not a git repo, or no origin — fall back to the folder.
+  }
+  return path.basename(projectDir);
+}
+
 async function ensureViewer(): Promise<Viewer> {
   if (!viewer) viewer = await startViewer(store, preferredPort, projectDir);
   openBrowser(`${viewer.url}?chart=${store.chartId}`);
+  // Approval happens in a browser mid-session, so retry until it lands.
+  if (!sync && config.service && config.storage !== "local") await ensureSync().catch(() => null);
   return viewer;
 }
 
@@ -126,6 +218,7 @@ server.registerTool(
     const root = folder ? resolveFolder(folder) : undefined;
     const { resumed } = store.init(title, description, (direction as Direction) ?? "TD", fresh ?? false, root);
     const v = await ensureViewer();
+    const syncNote = await ensureSync();
     const g = store.get();
     return ok(
       summary(
@@ -135,7 +228,9 @@ server.registerTool(
         resumed
           ? "Continue the existing tree — check current states before adding nodes, and reuse existing ids to update them."
           : "Next: add an options node for the choices you see, or an action node for what you're doing first.",
-      ) + `\nViewer: ${v.url}?chart=${store.chartId}`,
+      ) +
+        `\nViewer: ${v.url}?chart=${store.chartId}` +
+        (syncNote ? `\n\n${syncNote}` : sync ? `\nSynced to ${config.service}` : ""),
     );
   },
 );
@@ -535,7 +630,11 @@ server.registerResource(
 const shutdown = () => {
   store.release();
   viewer?.close();
-  process.exit(0);
+  if (!sync) process.exit(0);
+  // Give the queue a moment to drain rather than dropping the last ops.
+  const bail = setTimeout(() => process.exit(0), 3000);
+  bail.unref?.();
+  void sync.close().finally(() => process.exit(0));
 };
 process.on("SIGINT", shutdown);
 process.on("SIGTERM", shutdown);

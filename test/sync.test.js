@@ -160,3 +160,37 @@ test("pairing gives up rather than polling forever", async () => {
     /timed out/,
   );
 });
+
+// --- the wiring: a store's commits reach the queue ---
+
+test("ops committed to a store land in the sync queue", async () => {
+  const { GraphStore } = await import("../dist/store.js");
+  const fs = await import("node:fs");
+  const os = await import("node:os");
+  const path = await import("node:path");
+
+  const f = stubFetch(({ url }) =>
+    url.endsWith("/attach") ? { body: { chartId: "remote-1" } } : { body: { accepted: [], revision: 0 } },
+  );
+  const c = await client(f);
+
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "skym-sync-"));
+  const store = new GraphStore(root, "wired", "Wired");
+  // This is the subscription index.ts installs.
+  store.subscribe((_g, entry) => {
+    if (entry) c.enqueue(entry);
+  });
+
+  store.init("Wired");
+  store.upsertNode({ id: "a", title: "A", kind: "action" });
+  store.release();
+
+  assert.ok(c.pending >= 2, `expected queued ops, got ${c.pending}`);
+  await c.flush();
+  const posted = f.calls.filter((x) => x.url.includes("/ops"));
+  assert.equal(posted.length, 1, "one batch, not one request per op");
+  const ids = posted[0].body.ops.map((o) => o.id);
+  assert.ok(ids.every(Boolean), "every shipped op carries an id");
+  assert.equal(new Set(ids).size, ids.length, "no duplicates in the batch");
+  await c.close();
+});

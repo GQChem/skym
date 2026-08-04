@@ -9,12 +9,15 @@ export interface SkymConfig {
   vocab?: VocabOverride;
   /** Where charts are written. The service tier makes this meaningful. */
   storage?: "local" | "service" | "both";
+  /** Base URL of the hosted service; absent means local-only. */
+  service?: string;
 }
 
 export interface ResolvedConfig {
   theme: Theme;
   vocab: Vocabulary;
   storage: "local" | "service" | "both";
+  service?: string;
 }
 
 const USER_FILE = path.join(os.homedir(), ".skym", "config.json");
@@ -52,7 +55,13 @@ export function loadConfig(projectDir: string): ResolvedConfig {
   // a config can still restyle an individual state on top.
   const theme = resolveTheme(themeForVocab(DEFAULT_THEME, vocab), user?.theme, project?.theme);
 
-  return { theme, vocab, storage: project?.storage ?? user?.storage ?? "local" };
+  return {
+    theme,
+    vocab,
+    storage: project?.storage ?? user?.storage ?? "local",
+    // SKYM_SERVICE_URL wins so a deploy can be pointed at without editing config.
+    service: process.env.SKYM_SERVICE_URL ?? project?.service ?? user?.service,
+  };
 }
 
 /** What the viewer needs to draw and label a chart it did not lay out. */

@@ -30,7 +30,10 @@ import { tx } from "./db.js";
 import type { Entry } from "../../src/ops.js";
 
 const MAX_BODY = 4 * 1024 * 1024;
-const publicDir = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..", "public");
+const here = path.dirname(fileURLToPath(import.meta.url));
+// dist/service/src → service/public, and the viewer from the repo's public/.
+const publicDir = path.resolve(here, "..", "..", "..", "public");
+const viewerDir = path.resolve(here, "..", "..", "..", "..", "public");
 
 type Ctx = { pool: Pool; req: http.IncomingMessage; res: http.ServerResponse; url: URL };
 
@@ -198,6 +201,12 @@ async function route({ pool, req, res, url }: Ctx): Promise<void> {
     return json(res, ok ? 200 : 404, ok ? { ok: true } : { error: "unknown or expired code" });
   }
 
+  // Pages and their assets are public; the data behind them is not. Gating
+  // these too would 401 the very scripts that render the sign-in page.
+  if (method === "GET" && !pathname.startsWith("/api/") && !isDataRoute(pathname)) {
+    return serveStatic(res, pathname);
+  }
+
   // --- everything below needs a principal ---
 
   const who = await principal(pool, req);
@@ -206,6 +215,61 @@ async function route({ pool, req, res, url }: Ctx): Promise<void> {
   if (pathname === "/api/me" && method === "GET") {
     const r = await pool.query("SELECT id, email, name, avatar_url FROM users WHERE id = $1", [who.userId]);
     return json(res, 200, { user: r.rows[0], via: who.via });
+  }
+
+  // --- the viewer's own endpoints ---
+  //
+  // Same shapes the local viewer already fetches, so public/ runs unchanged
+  // against the service: only the source of the graph differs.
+
+  if (pathname === "/graph" && method === "GET") {
+    const want = url.searchParams.get("chart");
+    const chartId = want ?? (await firstChartFor(pool, who.userId));
+    if (!chartId) return json(res, 404, { error: "no charts yet" });
+    if (!(await canAccessChart(pool, who.userId, chartId))) return json(res, 403, { error: "forbidden" });
+    const graph = await tx(pool, (c) => buildGraph(c, chartId));
+    // Hosted charts are a window onto the agent's work, not an editor.
+    return json(res, 200, { graph, readOnly: true });
+  }
+
+  if (pathname === "/charts" && method === "GET") {
+    const r = await pool.query(
+      `SELECT c.id AS "chartId", c.title, c.revision, c.updated_at,
+              (SELECT count(*) FROM ops o WHERE o.chart_id = c.id) AS ops
+         FROM charts c
+         JOIN projects p ON p.id = c.project_id
+         LEFT JOIN project_members m ON m.project_id = p.id AND m.user_id = $1
+        WHERE p.owner_id = $1 OR m.user_id IS NOT NULL
+        ORDER BY c.updated_at DESC LIMIT 200`,
+      [who.userId],
+    );
+    const active = url.searchParams.get("chart");
+    return json(
+      res,
+      200,
+      r.rows.map((c) => ({
+        chartId: c.chartId,
+        title: c.title,
+        nodes: Number(c.ops),
+        active: c.chartId === active,
+      })),
+    );
+  }
+
+  if (pathname === "/config" && method === "GET") {
+    // The vocabulary a chart was written under, so custom kinds still render.
+    const want = url.searchParams.get("chart");
+    let vocab: unknown = null;
+    if (want && (await canAccessChart(pool, who.userId, want))) {
+      const r = await pool.query<{ vocab: unknown }>("SELECT vocab FROM charts WHERE id = $1", [want]);
+      vocab = r.rows[0]?.vocab ?? null;
+    }
+    return json(res, 200, vocab ? { vocab } : {});
+  }
+
+  if (pathname === "/whoami" && method === "GET") {
+    const r = await pool.query<{ email: string }>("SELECT email FROM users WHERE id = $1", [who.userId]);
+    return json(res, 200, { project: r.rows[0]?.email ?? "skym", hosted: true });
   }
 
   // Attach a chart by repo key, creating the project on first sight. This is
@@ -262,9 +326,12 @@ async function route({ pool, req, res, url }: Ctx): Promise<void> {
     return json(res, 200, { charts: r.rows });
   }
 
-  if (method === "GET" && !pathname.startsWith("/api/")) return serveStatic(res, pathname);
   json(res, 404, { error: "not found" });
 }
+
+/** Chart data the viewer fetches — public paths, private contents. */
+const DATA_ROUTES = new Set(["/graph", "/charts", "/config", "/whoami", "/events"]);
+const isDataRoute = (pathname: string): boolean => DATA_ROUTES.has(pathname);
 
 const MIME: Record<string, string> = {
   ".html": "text/html; charset=utf-8",
@@ -274,12 +341,25 @@ const MIME: Record<string, string> = {
   ".png": "image/png",
 };
 
-/** `/pair` and any unknown path fall back to the single page. */
+/**
+ * Two roots: the service's own pages, and the viewer, which is the same
+ * public/ the local server ships so there is one chart UI, not two.
+ */
 function serveStatic(res: http.ServerResponse, pathname: string): void {
   const rel = pathname === "/" ? "index.html" : pathname.replace(/^\/+/, "");
+
   let file = path.join(publicDir, rel);
-  if (!file.startsWith(publicDir) || !fs.existsSync(file) || !fs.statSync(file).isFile()) {
-    file = path.join(publicDir, "index.html");
+  const inService = file.startsWith(publicDir) && fs.existsSync(file) && fs.statSync(file).isFile();
+
+  if (!inService) {
+    // /chart renders the viewer; its assets resolve out of the same tree.
+    const viewerRel = pathname === "/chart" ? "index.html" : rel;
+    const candidate = path.join(viewerDir, viewerRel);
+    if (candidate.startsWith(viewerDir) && fs.existsSync(candidate) && fs.statSync(candidate).isFile()) {
+      file = candidate;
+    } else {
+      file = path.join(publicDir, "index.html");
+    }
   }
   if (!fs.existsSync(file)) return json(res, 404, { error: "not found" });
   res.writeHead(200, {
@@ -323,6 +403,19 @@ const clearedCookie = (req: http.IncomingMessage): string =>
 const redirect = (res: http.ServerResponse, to: string): void => {
   res.writeHead(302, { Location: to, "Cache-Control": "no-store" }).end();
 };
+
+/** Opening the viewer with no chart named lands on the most recent one. */
+async function firstChartFor(pool: Pool, userId: string): Promise<string | null> {
+  const r = await pool.query<{ id: string }>(
+    `SELECT c.id FROM charts c
+       JOIN projects p ON p.id = c.project_id
+       LEFT JOIN project_members m ON m.project_id = p.id AND m.user_id = $1
+      WHERE p.owner_id = $1 OR m.user_id IS NOT NULL
+      ORDER BY c.updated_at DESC LIMIT 1`,
+    [userId],
+  );
+  return r.rows[0]?.id ?? null;
+}
 
 async function attachChart(
   pool: Pool,
