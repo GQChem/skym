@@ -9,11 +9,24 @@ import { buildGraph, ingest } from "../dist/service/src/ingest.js";
  * assigns seq, retries are idempotent, validation reruns) are all about
  * concurrency and constraints, which a fake would not exercise.
  *
- * Set DATABASE_URL to run. Without one the suite skips rather than passing
- * vacuously, so a green run never implies coverage it does not have.
+ * Point TEST_DATABASE_URL at a throwaway database. These tests write users,
+ * projects, charts and ops, and never clean up, so they must not run against
+ * anything that matters. DATABASE_URL is deliberately NOT honoured: it is the
+ * production connection wherever the service runs.
+ *
+ * Without one the suite skips rather than passing vacuously, so a green run
+ * never implies coverage it does not have.
  */
-const url = process.env.DATABASE_URL;
-const skip = url ? false : "DATABASE_URL not set — skipping ingest integration tests";
+const url = process.env.TEST_DATABASE_URL;
+
+// Railway's private hostname only resolves inside its network, so `railway
+// run` forwards a URL that cannot be reached from a laptop. Say so plainly
+// rather than failing six times with a DNS error.
+const unreachable = url?.includes(".railway.internal")
+  ? "TEST_DATABASE_URL points at Railway's private host, which only resolves inside Railway. Use DATABASE_PUBLIC_URL or a local Postgres."
+  : null;
+
+const skip = unreachable ?? (url ? false : "TEST_DATABASE_URL not set — skipping ingest integration tests");
 
 let pool;
 let userId;

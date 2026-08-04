@@ -8,7 +8,8 @@
     "build": "tsc",
     "start": "node dist/service/src/main.js",
     "dev": "tsc --watch",
-    "test": "npm run build && node --test \"test/*.test.js\""
+    "test": "npm run build && node --test \"test/*.test.js\"",
+    "test:db": "node scripts/test-with-db.mjs"
   },
   "dependencies": {
     "pg": "^8.13.0"
