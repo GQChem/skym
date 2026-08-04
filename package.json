@@ -6,15 +6,18 @@
   "bin": {
     "skym-flow": "dist/index.js"
   },
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
   "exports": {
-    ".": { "types": "./dist/index.d.ts", "default": "./dist/index.js" },
-    "./ops": { "types": "./dist/ops.d.ts", "default": "./dist/ops.js" },
-    "./store": { "types": "./dist/store.d.ts", "default": "./dist/store.js" },
-    "./validate": { "types": "./dist/validate.d.ts", "default": "./dist/validate.js" },
-    "./vocab": { "types": "./dist/vocab.d.ts", "default": "./dist/vocab.js" },
-    "./theme": { "types": "./dist/theme.d.ts", "default": "./dist/theme.js" },
-    "./layout": { "types": "./dist/layout.d.ts", "default": "./dist/layout.js" },
-    "./render": { "types": "./dist/render.d.ts", "default": "./dist/render.js" }
+    ".": { "types": "./dist/index.d.ts", "import": "./dist/index.js" },
+    "./ops": { "types": "./dist/ops.d.ts", "import": "./dist/ops.js" },
+    "./store": { "types": "./dist/store.d.ts", "import": "./dist/store.js" },
+    "./validate": { "types": "./dist/validate.d.ts", "import": "./dist/validate.js" },
+    "./vocab": { "types": "./dist/vocab.d.ts", "import": "./dist/vocab.js" },
+    "./theme": { "types": "./dist/theme.d.ts", "import": "./dist/theme.js" },
+    "./layout": { "types": "./dist/layout.d.ts", "import": "./dist/layout.js" },
+    "./render": { "types": "./dist/render.d.ts", "import": "./dist/render.js" },
+    "./package.json": "./package.json"
   },
   "files": [
     "dist",
