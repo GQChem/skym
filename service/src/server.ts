@@ -74,9 +74,32 @@ async function principal(pool: Pool, req: http.IncomingMessage): Promise<Princip
   return sid ? resolveSession(pool, sid) : null;
 }
 
-export function createServer(pool: Pool): http.Server {
+export interface BootStatus {
+  ready: boolean;
+  bootError: string | null;
+}
+
+export function createServer(pool: Pool | null, status: () => BootStatus = () => ({ ready: true, bootError: null })): http.Server {
   return http.createServer(async (req, res) => {
     const url = new URL(req.url ?? "/", `http://${req.headers.host ?? "localhost"}`);
+
+    // Answered before anything else and without touching the database, so a
+    // misconfigured deploy says what is wrong instead of timing out.
+    if (url.pathname === "/health") {
+      const s = status();
+      if (!pool || !s.ready) {
+        return json(res, 503, { ok: false, error: s.bootError ?? "starting" });
+      }
+      try {
+        await pool.query("SELECT 1");
+        return json(res, 200, { ok: true });
+      } catch (err) {
+        return json(res, 503, { ok: false, error: `database unreachable: ${(err as Error).message}` });
+      }
+    }
+
+    if (!pool) return json(res, 503, { error: status().bootError ?? "service not configured" });
+
     const ctx: Ctx = { pool, req, res, url };
     try {
       await route(ctx);
@@ -91,11 +114,6 @@ export function createServer(pool: Pool): http.Server {
 async function route({ pool, req, res, url }: Ctx): Promise<void> {
   const { pathname } = url;
   const method = req.method ?? "GET";
-
-  if (pathname === "/health") {
-    await pool.query("SELECT 1");
-    return json(res, 200, { ok: true });
-  }
 
   // --- sign-in ---
 
