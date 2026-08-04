@@ -1,0 +1,25 @@
+{
+  "name": "skym-service",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Hosted charts, accounts, and the remote command queue for skym-flow.",
+  "scripts": {
+    "build": "tsc",
+    "start": "node dist/main.js",
+    "dev": "tsc --watch",
+    "test": "npm run build && node --test \"test/*.test.js\""
+  },
+  "dependencies": {
+    "pg": "^8.13.0",
+    "skym-flow": "file:.."
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.0",
+    "@types/pg": "^8.11.10",
+    "typescript": "^5.7.2"
+  },
+  "engines": {
+    "node": ">=18"
+  }
+}

@@ -2,6 +2,10 @@ node_modules/
 dist/
 *.log
 
+# Real credentials; service/.env.example is the committed template.
+.env
+.env.local
+
 # Charts are per-chat working state. To commit them in a project that uses
 # skym-flow, drop this line — assets/ and .lock are excluded just below.
 .flows/
