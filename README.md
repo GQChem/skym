@@ -104,13 +104,51 @@ The shipped `.gitignore` commits `graph.json` but ignores `assets/` — charts s
 
 ## Customising the cards
 
-Card geometry, type scale, and palette are data, resolved as **defaults → user → project**. Drop a `theme.json` at `~/.skym/theme.json` for every project, or `.skym/theme.json` inside one to override it there:
+Card geometry, type scale, and palette are data, resolved as **defaults → user → project**. Drop a `config.json` at `~/.skym/config.json` for every project, or `.skym/config.json` inside one to override it there:
 
 ```json
-{ "card": { "width": 320, "radius": 14 }, "light": { "states": { "good": { "accent": "#0f766e" } } } }
+{ "theme": { "card": { "width": 320, "radius": 14 }, "light": { "states": { "good": { "accent": "#0f766e" } } } } }
 ```
 
-Any subset works; unspecified values fall through. Note that state colours were validated for colour-vision separation — if you replace them, keep the pairs distinguishable.
+Any subset works; unspecified values fall through. Note that state colours were validated for colour-vision separation — if you replace them, keep the pairs distinguishable. A bare `theme.json` in the same directory is still read as the theme section.
+
+## Templates: choosing the node vocabulary
+
+Which kinds a chart may contain, and which states each carries, is per-project data. One tool is generated per kind — a project using the `research` template gets `flow_question`, `flow_experiment`, and `flow_finding` instead of `flow_action` and `flow_result`, each with its own states and its own description.
+
+Pick a builtin template:
+
+```json
+{ "vocab": { "template": "research" } }
+```
+
+| Template | Kinds |
+| --- | --- |
+| `default` | action, result, options, note |
+| `research` | question, experiment, finding, note |
+| `decision-log` | options, decision, note |
+
+Or define a kind of your own, which is added alongside the template's:
+
+```json
+{
+  "vocab": {
+    "kinds": [{
+      "slug": "risk",
+      "label": "Risk",
+      "blurb": "Something that could go wrong.",
+      "defaultState": "watch",
+      "states": [{
+        "slug": "watch", "label": "watch", "glyph": "⚠", "blurb": "keep an eye on it",
+        "light": { "accent": "#b45309", "fill": "#fffbeb", "border": "#fcd34d" },
+        "dark":  { "accent": "#fbbf24", "fill": "#292524", "border": "#78350f" }
+      }]
+    }]
+  }
+}
+```
+
+A state may also set `"pulse": true` to animate the card's stripe while the work is live, and `"open": true` to count as unresolved in `flow_find`. Charts are stored with their kind and state as plain strings, so a chart written under one template still opens under another — an unrecognised state simply draws in neutral ink.
 
 ## Configuration
 

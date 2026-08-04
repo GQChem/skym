@@ -9,8 +9,14 @@ import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js"
 let port = 7500;
 
 /** Boots the real server over stdio, as Claude Code does. */
-async function boot() {
+async function boot(vocab) {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), "skym-mcp-"));
+  // The vocabulary is read from the project dir, so point it at a scratch one.
+  const projectDir = fs.mkdtempSync(path.join(os.tmpdir(), "skym-proj-"));
+  if (vocab) {
+    fs.mkdirSync(path.join(projectDir, ".skym"), { recursive: true });
+    fs.writeFileSync(path.join(projectDir, ".skym", "config.json"), JSON.stringify({ vocab }), "utf8");
+  }
   const client = new Client({ name: "test", version: "1.0.0" });
   await client.connect(
     new StdioClientTransport({
@@ -21,11 +27,12 @@ async function boot() {
         ...process.env,
         SKYM_NO_OPEN: "1",
         SKYM_STATE_DIR: root,
+        SKYM_PROJECT_DIR: projectDir,
         SKYM_PORT: String(port++),
       },
     }),
   );
-  return { client, root, [Symbol.asyncDispose]: () => client.close() };
+  return { client, root, projectDir, [Symbol.asyncDispose]: () => client.close() };
 }
 
 const text = (r) => r.content[0].text;
@@ -39,6 +46,77 @@ test("exposes the expected tool surface", async () => {
       "flow_init", "flow_note", "flow_options", "flow_remove", "flow_result",
       "flow_show", "flow_state",
     ]);
+  } finally {
+    await s.client.close();
+  }
+});
+
+test("a project template replaces the generated per-kind tools", async () => {
+  const s = await boot({ template: "research" });
+  try {
+    const names = (await s.client.listTools()).tools.map((t) => t.name);
+    for (const want of ["flow_question", "flow_experiment", "flow_finding"]) {
+      assert.ok(names.includes(want), `expected ${want}, got ${names.join(", ")}`);
+    }
+    for (const gone of ["flow_action", "flow_result"]) {
+      assert.ok(!names.includes(gone), `${gone} should not exist under the research template`);
+    }
+  } finally {
+    await s.client.close();
+  }
+});
+
+test("a templated tool enforces its own states and defaults", async () => {
+  const s = await boot({ template: "research" });
+  try {
+    await s.client.callTool({ name: "flow_init", arguments: { title: "Lab" } });
+    const ok = await s.client.callTool({
+      name: "flow_finding",
+      arguments: { id: "f1", title: "p99 dropped", state: "good" },
+    });
+    assert.match(text(ok), /1 good/);
+
+    // A state from another kind must still be refused.
+    const bad = await s.client.callTool({ name: "flow_finding", arguments: { id: "f2", state: "planned" } });
+    assert.ok(bad.isError, "a foreign state should be rejected");
+
+    // No state given falls to the kind's default, not a hardcoded "planned".
+    const dflt = await s.client.callTool({ name: "flow_question", arguments: { id: "q1", title: "Why?" } });
+    assert.match(text(dflt), /1 planned/);
+  } finally {
+    await s.client.close();
+  }
+});
+
+test("a project can add a kind of its own alongside the builtins", async () => {
+  const s = await boot({
+    kinds: [
+      {
+        slug: "risk",
+        label: "Risk",
+        blurb: "Something that could go wrong.",
+        defaultState: "watch",
+        states: [
+          {
+            slug: "watch",
+            label: "watch",
+            glyph: "!",
+            blurb: "keep an eye on it",
+            light: { accent: "#b45309", fill: "#fffbeb", border: "#fcd34d" },
+            dark: { accent: "#fbbf24", fill: "#292524", border: "#78350f" },
+          },
+        ],
+      },
+    ],
+  });
+  try {
+    const names = (await s.client.listTools()).tools.map((t) => t.name);
+    assert.ok(names.includes("flow_risk"), `expected flow_risk, got ${names.join(", ")}`);
+    assert.ok(names.includes("flow_action"), "the builtin kinds should survive");
+
+    await s.client.callTool({ name: "flow_init", arguments: { title: "Mixed" } });
+    const added = await s.client.callTool({ name: "flow_risk", arguments: { id: "r1", title: "Disk fills" } });
+    assert.match(text(added), /1 watch/);
   } finally {
     await s.client.close();
   }
@@ -239,10 +317,9 @@ test("folder puts the chart where asked", async () => {
       arguments: { title: "Placed", folder: "docs/design" },
     });
     assert.ok(!r.isError, text(r));
-    // SKYM_STATE_DIR is overridden by folder, which resolves against the cwd.
-    const dir = path.join(process.cwd(), "docs", "design", "charts", "placed");
+    // SKYM_STATE_DIR is overridden by folder, which resolves against the project dir.
+    const dir = path.join(s.projectDir, "docs", "design", "charts", "placed");
     assert.ok(fs.existsSync(path.join(dir, "graph.json")), `expected chart at ${dir}`);
-    fs.rmSync(path.join(process.cwd(), "docs"), { recursive: true, force: true });
   } finally {
     await s.client.close();
   }

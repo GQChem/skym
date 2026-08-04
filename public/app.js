@@ -2,6 +2,7 @@ import dagre from "./vendor/dagre.js";
 import { detailForZoom, layoutGraph } from "./vendor/layout.js";
 import { renderSvg } from "./vendor/render.js";
 import { DEFAULT_THEME, KIND_LABEL, STATE_GLYPH, paletteFor, resolveTheme } from "./vendor/theme.js";
+import { DEFAULT_VOCAB, glyphs, kindLabels, pulseStates } from "./vendor/vocab.js";
 
 const $ = (id) => document.getElementById(id);
 const canvas = $("canvas");
@@ -20,6 +21,11 @@ let selectedId = null;
 let chartParam = new URLSearchParams(location.search).get("chart");
 let ownChartId = null;
 let theme = DEFAULT_THEME;
+let vocab = DEFAULT_VOCAB;
+/** Derived from vocab so the renderer labels custom kinds correctly. */
+let vocabGlyphs = glyphs(DEFAULT_VOCAB);
+let vocabLabels = kindLabels(DEFAULT_VOCAB);
+let vocabPulse = pulseStates(DEFAULT_VOCAB);
 let lastLayout = null;
 
 const store = {
@@ -47,9 +53,15 @@ const escapeHtml = (s) =>
 const assetUrl = (file) =>
   `/assets/${encodeURIComponent(file)}${chartParam ? `?chart=${encodeURIComponent(chartParam)}` : ""}`;
 
-/** Project config may restyle cards; user settings win over neither yet. */
-const applyThemeOverrides = (overrides) => {
-  theme = resolveTheme(DEFAULT_THEME, overrides?.user, overrides?.project);
+/** The server resolves user→project layering, so this just takes the result. */
+const applyConfig = (config) => {
+  if (config?.theme) theme = config.theme;
+  if (config?.vocab?.kinds?.length) {
+    vocab = config.vocab;
+    vocabGlyphs = glyphs(vocab);
+    vocabLabels = kindLabels(vocab);
+    vocabPulse = pulseStates(vocab);
+  }
 };
 
 // --- view transform ---
@@ -132,8 +144,11 @@ const draw = () => {
   }
 
   detailLevel = detailMode === "auto" ? detailForZoom(view.k) : detailMode;
-  lastLayout = layoutGraph(graph, theme, dagre, showFigures, detailLevel);
+  lastLayout = layoutGraph(graph, theme, dagre, showFigures, detailLevel, vocabLabels);
   canvas.innerHTML = renderSvg(lastLayout, {
+    glyphs: vocabGlyphs,
+    kindLabels: vocabLabels,
+    pulseStates: vocabPulse,
     theme,
     palette: paletteFor(theme, mode),
     figureSrc: assetUrl,
@@ -176,8 +191,9 @@ const select = (id) => {
     const rect = el.querySelector(".skym-card");
     if (!rect) continue;
     const on = el.dataset.id === id;
-    const ink = paletteFor(theme, mode).states[el.dataset.state];
-    rect.setAttribute("stroke", on ? paletteFor(theme, mode).focus : ink.border);
+    const palette = paletteFor(theme, mode);
+    const ink = palette.states[el.dataset.state] ?? palette.neutral;
+    rect.setAttribute("stroke", on ? palette.focus : ink.border);
     rect.setAttribute("stroke-width", on ? theme.card.selectedWidth : theme.card.borderWidth);
     el.classList.toggle("is-selected", on);
   }
@@ -198,10 +214,13 @@ const renderDetail = () => {
     return;
   }
   detail.className = "";
+  const palette = paletteFor(theme, mode);
+  const stateInk = palette.states[node.state] ?? palette.neutral;
   const parts = [
     `<div class="detail-title"></div>`,
-    `<div class="chips"><span class="chip state-${node.state}">${escapeHtml(node.state)}</span>` +
-      `<span class="chip">${escapeHtml(node.kind)}</span>` +
+    `<div class="chips">` +
+      `<span class="chip state-${escapeHtml(node.state)}" style="color:${stateInk.accent}">${escapeHtml(node.state)}</span>` +
+      `<span class="chip">${escapeHtml(vocabLabels[node.kind] ?? node.kind)}</span>` +
       (node.group ? `<span class="chip">${escapeHtml(node.group)}</span>` : "") +
       `</div>`,
   ];
@@ -237,71 +256,31 @@ const renderEvents = () => {
     .join("");
 };
 
-// Grouped by kind: the vocabulary is three kinds each with its own states, and
-// a flat list of twelve hides that structure.
-const LEGEND_GROUPS = [
-  {
-    kind: "action",
-    blurb: "something done or to be done",
-    states: [
-      ["planned", "not started"],
-      ["exploring", "working now"],
-      ["waiting", "blocked on a wait"],
-      ["done", "finished"],
-      ["blocked", "stuck"],
-      ["abandoned", "dead end"],
-    ],
-  },
-  {
-    kind: "result",
-    blurb: "what an action produced",
-    states: [
-      ["good", "it worked"],
-      ["bad", "it did not"],
-      ["mixed", "tradeoffs"],
-      ["inconclusive", "needs more"],
-    ],
-  },
-  {
-    kind: "options",
-    blurb: "a fork in the work",
-    states: [
-      ["open", "undecided"],
-      ["resolved", "decided"],
-    ],
-  },
-  {
-    kind: "note",
-    blurb: "context, not a step",
-    states: [
-      ["active", "still true"],
-      ["retired", "no longer applies"],
-    ],
-  },
-];
-
+// Grouped by kind: a flat list of every state hides which kind each belongs to.
 const renderLegend = () => {
   const palette = paletteFor(theme, mode);
-  $("legend").innerHTML = LEGEND_GROUPS.map(
-    (g) =>
-      `<div class="leg-group">` +
-      `<div class="leg-kind">${escapeHtml(KIND_LABEL[g.kind] ?? g.kind)}<span>${escapeHtml(g.blurb)}</span></div>` +
-      g.states
-        .map(([st, what]) => {
-          const ink = palette.states[st];
-          // A miniature of the real card, so the legend teaches the chart.
-          return (
-            `<div class="leg" data-state="${st}">` +
-            `<span class="leg-chip" style="background:${ink.fill};border-color:${ink.border}">` +
-            `<span class="leg-stripe" style="background:${ink.accent}"></span>` +
-            `<span class="leg-glyph" style="color:${ink.accent}">${escapeHtml(STATE_GLYPH[st] ?? "•")}</span>` +
-            `</span>` +
-            `<b>${escapeHtml(st)}</b><span class="muted">${escapeHtml(what)}</span></div>`
-          );
-        })
-        .join("") +
-      `</div>`,
-  ).join("");
+  $("legend").innerHTML = vocab.kinds
+    .map(
+      (k) =>
+        `<div class="leg-group">` +
+        `<div class="leg-kind">${escapeHtml(k.label)}<span>${escapeHtml(k.blurb)}</span></div>` +
+        k.states
+          .map((s) => {
+            const ink = palette.states[s.slug] ?? palette.neutral;
+            // A miniature of the real card, so the legend teaches the chart.
+            return (
+              `<div class="leg" data-state="${escapeHtml(s.slug)}">` +
+              `<span class="leg-chip" style="background:${ink.fill};border-color:${ink.border}">` +
+              `<span class="leg-stripe" style="background:${ink.accent}"></span>` +
+              `<span class="leg-glyph" style="color:${ink.accent}">${escapeHtml(s.glyph)}</span>` +
+              `</span>` +
+              `<b>${escapeHtml(s.label)}</b><span class="muted">${escapeHtml(s.blurb)}</span></div>`
+            );
+          })
+          .join("") +
+        `</div>`,
+    )
+    .join("");
 };
 
 // --- node action menu ---
@@ -585,7 +564,7 @@ const boot = async () => {
   const config = await fetch("/config")
     .then((r) => r.json())
     .catch(() => ({}));
-  applyThemeOverrides(config);
+  applyConfig(config);
   if (savedWidth) theme = resolveTheme(theme, { card: { width: savedWidth } });
   widthEl.value = String(theme.card.width);
 

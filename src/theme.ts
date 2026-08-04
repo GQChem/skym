@@ -1,4 +1,7 @@
-import type { NodeKind, NodeState } from "./store.js";
+import { DEFAULT_VOCAB, NEUTRAL_INK, glyphs, inksFor, kindLabels, type Vocabulary } from "./vocab.js";
+import type { StateInk } from "./vocab.js";
+
+export type { StateInk };
 
 /**
  * Card geometry, type scale, and palette are data — user and project configs
@@ -48,14 +51,6 @@ export interface LayoutMetrics {
   arrow: number;
 }
 
-export interface StateInk {
-  /** Stripe, glyph, and border colour. */
-  accent: string;
-  /** Card fill — a wash of the accent, never a saturated block. */
-  fill: string;
-  border: string;
-}
-
 export interface Palette {
   surface: string;
   plane: string;
@@ -69,7 +64,10 @@ export interface Palette {
   focus: string;
   /** Plate behind figures; light in both modes — see render.ts. */
   figurePlate: string;
-  states: Record<NodeState, StateInk>;
+  /** Keyed by state slug; unknown states fall back to `neutral`. */
+  states: Record<string, StateInk>;
+  /** Ink for a state the current vocabulary does not define. */
+  neutral: StateInk;
 }
 
 /**
@@ -82,39 +80,8 @@ export interface Palette {
  * Both sit in the 6–8 CVD band, which is legal only because every state also
  * carries a glyph and a written label — never colour alone.
  */
-const LIGHT_STATES: Record<NodeState, StateInk> = {
-  planned: { accent: "#6b7789", fill: "#ffffff", border: "#d3dae6" },
-  exploring: { accent: "#2a78d6", fill: "#f2f7fe", border: "#a9cbf2" },
-  waiting: { accent: "#eda100", fill: "#fdf8ec", border: "#e8cf9a" },
-  done: { accent: "#4a6ea8", fill: "#f7f9fc", border: "#c6d3e6" },
-  abandoned: { accent: "#9aa3b2", fill: "#fafbfc", border: "#dde2ea" },
-  blocked: { accent: "#d03b3b", fill: "#fdf4f4", border: "#eec3c3" },
-  good: { accent: "#0d8a63", fill: "#f0faf6", border: "#a5ddc7" },
-  bad: { accent: "#d03b3b", fill: "#fdf3f4", border: "#efc0c4" },
-  mixed: { accent: "#eda100", fill: "#fdf8eb", border: "#e9cd93" },
-  inconclusive: { accent: "#6b7789", fill: "#f8f9fb", border: "#d5dbe4" },
-  open: { accent: "#4a3aa7", fill: "#f6f5fd", border: "#c3bce8" },
-  resolved: { accent: "#5d6f96", fill: "#f7f8fc", border: "#ccd5e6" },
-  active: { accent: "#6b7789", fill: "#fbfbfc", border: "#dfe3ea" },
-  retired: { accent: "#9aa3b2", fill: "#fafbfc", border: "#e6e9ee" },
-};
-
-const DARK_STATES: Record<NodeState, StateInk> = {
-  planned: { accent: "#8b97ab", fill: "#1d2331", border: "#333c4e" },
-  exploring: { accent: "#3987e5", fill: "#16233a", border: "#2c4a72" },
-  waiting: { accent: "#c98500", fill: "#241f12", border: "#4a3d1c" },
-  done: { accent: "#7b8db5", fill: "#1c2231", border: "#333d52" },
-  abandoned: { accent: "#6b7484", fill: "#191d28", border: "#2b323f" },
-  blocked: { accent: "#d84559", fill: "#2a1c23", border: "#57303c" },
-  good: { accent: "#26ab8b", fill: "#172c26", border: "#265448" },
-  bad: { accent: "#d84559", fill: "#2b1c22", border: "#573039" },
-  mixed: { accent: "#c98500", fill: "#241f12", border: "#4a3d1c" },
-  inconclusive: { accent: "#8b97ab", fill: "#1c2130", border: "#323a4a" },
-  open: { accent: "#9085e9", fill: "#1d1b33", border: "#3a3560" },
-  resolved: { accent: "#7d87a8", fill: "#1b1f2e", border: "#333a4c" },
-  active: { accent: "#8b97ab", fill: "#1b1f2b", border: "#333b49" },
-  retired: { accent: "#6b7484", fill: "#181c25", border: "#2a303b" },
-};
+const LIGHT_STATES = inksFor(DEFAULT_VOCAB, "light");
+const DARK_STATES = inksFor(DEFAULT_VOCAB, "dark");
 
 export const DEFAULT_THEME: Theme = {
   name: "skym",
@@ -162,6 +129,7 @@ export const DEFAULT_THEME: Theme = {
     focus: "#2a78d6",
     figurePlate: "#ffffff",
     states: LIGHT_STATES,
+    neutral: NEUTRAL_INK.light,
   },
   dark: {
     surface: "#161b26",
@@ -176,36 +144,34 @@ export const DEFAULT_THEME: Theme = {
     focus: "#5aa3e8",
     figurePlate: "#f2f4f8",
     states: DARK_STATES,
+    neutral: NEUTRAL_INK.dark,
   },
 };
 
 /** Glyphs are the secondary encoding the CVD warn band requires. */
-export const STATE_GLYPH: Record<NodeState, string> = {
-  planned: "○",
-  exploring: "◐",
-  waiting: "◔",
-  done: "●",
-  abandoned: "⊘",
-  blocked: "▲",
-  good: "✓",
-  bad: "✕",
-  mixed: "~",
-  inconclusive: "?",
-  open: "⋔",
-  resolved: "◆",
-  active: "※",
-  retired: "·",
-};
+export const STATE_GLYPH: Record<string, string> = glyphs(DEFAULT_VOCAB);
 
-export const KIND_LABEL: Record<NodeKind, string> = {
-  action: "Action",
-  result: "Result",
-  options: "Decision",
-  note: "Note",
-};
+export const KIND_LABEL: Record<string, string> = kindLabels(DEFAULT_VOCAB);
 
 export function paletteFor(theme: Theme, mode: "light" | "dark"): Palette {
   return mode === "dark" ? theme.dark : theme.light;
+}
+
+/** Ink for a state, falling back to neutral rather than a literal state name. */
+export function inkFor(palette: Palette, state: string): StateInk {
+  return palette.states[state] ?? palette.neutral;
+}
+
+/**
+ * Folds a project's vocabulary into the theme, so a custom kind's states get
+ * their colours without the caller threading two objects everywhere.
+ */
+export function themeForVocab(theme: Theme, vocab: Vocabulary): Theme {
+  return {
+    ...theme,
+    light: { ...theme.light, states: { ...theme.light.states, ...inksFor(vocab, "light") } },
+    dark: { ...theme.dark, states: { ...theme.dark.states, ...inksFor(vocab, "dark") } },
+  };
 }
 
 /** Config layers merge shallowly per section: defaults → user → project. */
@@ -214,8 +180,8 @@ export type ThemeOverride = {
   card?: Partial<CardMetrics>;
   type?: Partial<TypeScale>;
   layout?: Partial<LayoutMetrics>;
-  light?: Partial<Omit<Palette, "states">> & { states?: Partial<Record<NodeState, Partial<StateInk>>> };
-  dark?: Partial<Omit<Palette, "states">> & { states?: Partial<Record<NodeState, Partial<StateInk>>> };
+  light?: Partial<Omit<Palette, "states">> & { states?: Record<string, Partial<StateInk>> };
+  dark?: Partial<Omit<Palette, "states">> & { states?: Record<string, Partial<StateInk>> };
 };
 
 export function resolveTheme(base: Theme, ...overrides: (ThemeOverride | undefined)[]): Theme {
@@ -242,7 +208,8 @@ function mergePalette(base: Palette, o: ThemeOverride["light"]): Palette {
   if (states) {
     merged.states = { ...base.states };
     for (const [k, v] of Object.entries(states)) {
-      if (v) merged.states[k as NodeState] = { ...base.states[k as NodeState], ...v };
+      // A state the base has never seen has no ink to spread, so start from neutral.
+      if (v) merged.states[k] = { ...(base.states[k] ?? base.neutral), ...v };
     }
   }
   return merged;

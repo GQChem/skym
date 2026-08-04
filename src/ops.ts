@@ -76,12 +76,12 @@ export function describe(op: Op, existed = false): { kind: string; detail: strin
   }
 }
 
-const DEFAULT_STATE: Record<NodeKind, NodeState> = {
-  action: "planned",
-  result: "inconclusive",
-  options: "open",
-  note: "active",
-};
+/**
+ * Replay must not depend on project config — a chart written under one template
+ * has to load under another. Ops carry their state explicitly; this is only the
+ * floor for a legacy op that omitted one.
+ */
+const FALLBACK_STATE = "planned";
 
 export function emptyGraph(chartId: string, title: string, at = Date.now()): Graph {
   return {
@@ -138,7 +138,7 @@ export function apply(graph: Graph, entry: Entry): Graph {
           id: op.id,
           title: op.title ?? op.id,
           kind,
-          state: op.state ?? DEFAULT_STATE[kind],
+          state: op.state ?? FALLBACK_STATE,
           bullets: op.bullets ?? [],
           group: op.group,
           figures: [],

@@ -172,9 +172,9 @@ main {
 
 .skym-figure { cursor: zoom-in; }
 
-/* The working state pulses so a live chart reads as moving without animating
-   every card on screen. */
-.skym-node[data-state="exploring"] .skym-stripe {
+/* States the vocabulary marks as in-flight pulse, so a live chart reads as
+   moving without animating every card on screen. */
+.skym-node[data-pulse] .skym-stripe {
   animation: skym-pulse 1.9s ease-in-out infinite;
 }
 
@@ -184,7 +184,7 @@ main {
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .skym-node[data-state="exploring"] .skym-stripe { animation: none; }
+  .skym-node[data-pulse] .skym-stripe { animation: none; }
 }
 
 .empty {
@@ -249,50 +249,9 @@ code {
   color: var(--muted);
 }
 
-/* One source of truth for state colour, shared by chips and legend swatches. */
-:root {
-  --st-planned: #94a1b8;
-  --st-exploring: #2f7fc4;
-  --st-waiting: #c9861a;
-  --st-done: #4a6ea8;
-  --st-abandoned: #a0a0ad;
-  --st-blocked: #d98324;
-  --st-good: #1e8a63;
-  --st-bad: #c0394a;
-  --st-mixed: #b8860b;
-  --st-inconclusive: #7d8798;
-  --st-open: #8257c4;
-  --st-resolved: #8257c4;
-}
-
-:root[data-theme="dark"] {
-  --st-planned: #8d9ab4;
-  --st-exploring: #7cc4ff;
-  --st-waiting: #f0c260;
-  --st-done: #7b8db5;
-  --st-abandoned: #7a7a88;
-  --st-blocked: #e5a93f;
-  --st-good: #5fd6a4;
-  --st-bad: #ff8a99;
-  --st-mixed: #e8c35c;
-  --st-inconclusive: #93a1bd;
-  --st-open: #b291f0;
-  --st-resolved: #9d7fe0;
-}
-
+/* Colour comes inline from the vocabulary's palette — see renderDetail — so a
+   custom state is styled without a matching rule having to exist here. */
 .chip[class*="state-"] { border-color: currentColor; }
-.chip.state-planned { color: var(--st-planned); }
-.chip.state-exploring { color: var(--st-exploring); }
-.chip.state-waiting { color: var(--st-waiting); }
-.chip.state-done { color: var(--st-done); }
-.chip.state-abandoned { color: var(--st-abandoned); }
-.chip.state-blocked { color: var(--st-blocked); }
-.chip.state-good { color: var(--st-good); }
-.chip.state-bad { color: var(--st-bad); }
-.chip.state-mixed { color: var(--st-mixed); }
-.chip.state-inconclusive { color: var(--st-inconclusive); }
-.chip.state-open { color: var(--st-open); }
-.chip.state-resolved { color: var(--st-resolved); }
 
 .bullets {
   margin: 10px 0;

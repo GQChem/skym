@@ -46,7 +46,11 @@ test("no id is used twice in the markup", () => {
 });
 
 test("the viewer imports only modules the build actually stages", () => {
-  const staged = new Set(["dagre.js", "layout.js", "render.js", "theme.js"]);
+  // Read from the build script rather than restating it, so adding a shared
+  // module to one place cannot silently pass here.
+  const script = fs.readFileSync(path.join(process.cwd(), "scripts", "build-client.mjs"), "utf8");
+  const shared = script.match(/const shared = \[([^\]]+)\]/)[1].match(/"([^"]+)"/g).map((s) => s.slice(1, -1));
+  const staged = new Set([...shared, "dagre.js"]);
   for (const m of app.matchAll(/from\s+"\.\/vendor\/([^"]+)"/g)) {
     assert.ok(staged.has(m[1]), `app.js imports vendor/${m[1]}, which build-client.mjs does not stage`);
   }

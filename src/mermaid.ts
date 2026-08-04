@@ -1,4 +1,5 @@
-import type { FlowNode, Graph, NodeState } from "./store.js";
+import type { FlowNode, Graph } from "./store.js";
+import { STATE_GLYPH, DEFAULT_THEME } from "./theme.js";
 
 export type Theme = "light" | "dark";
 
@@ -12,7 +13,12 @@ function escapeLabel(text: string): string {
     .replace(/[[\]{}()]/g, (c) => `#${c.charCodeAt(0)};`);
 }
 
-const STATE_MARK: Record<NodeState, string> = {
+/**
+ * Mermaid's marks predate the SVG renderer's glyphs and are tuned for a text
+ * export, so they stay distinct; an unlisted state falls back to the
+ * vocabulary's glyph rather than rendering as undefined.
+ */
+const STATE_MARK: Record<string, string> = {
   planned: "○",
   exploring: "⚙",
   waiting: "⏳",
@@ -29,8 +35,10 @@ const STATE_MARK: Record<NodeState, string> = {
   retired: "·",
 };
 
+const markFor = (state: string): string => STATE_MARK[state] ?? STATE_GLYPH[state] ?? "•";
+
 /** Wrapped so CSS can animate the mark without touching the rest of the label. */
-const ANIMATED: Partial<Record<NodeState, string>> = {
+const ANIMATED: Record<string, string> = {
   exploring: "skym-gear",
   waiting: "skym-hourglass",
 };
@@ -41,9 +49,7 @@ const MAX_BULLET_CHARS = 102; // 50% wider boxes fit proportionally more text
 /** All three kinds are rounded rects; state and kind are carried by fill/border. */
 function nodeLabel(n: FlowNode): string {
   const anim = ANIMATED[n.state];
-  const mark = anim
-    ? `<span class='${anim}'>${STATE_MARK[n.state]}</span>`
-    : STATE_MARK[n.state];
+  const mark = anim ? `<span class='${anim}'>${markFor(n.state)}</span>` : markFor(n.state);
   const head = `<b>${mark} ${escapeLabel(n.title)}</b>`;
   const shown = n.bullets.slice(0, MAX_BULLETS);
   const bullets = shown.map((b) => {
@@ -100,9 +106,30 @@ export function toMermaid(graph: Graph, theme: Theme = "light"): string {
   }
 
   for (const n of graph.nodes) lines.push(`  class ${safeId(n.id)} st_${n.state};`);
-  lines.push(...(theme === "light" ? LIGHT : DARK));
+  const base = theme === "light" ? LIGHT : DARK;
+  lines.push(...base, ...extraClassDefs(graph, base, theme));
 
   return lines.join("\n");
+}
+
+/**
+ * A state the hand-tuned lists never covered — a custom one, or `active`/
+ * `retired`, which they omit — would render unstyled. Derive it from the
+ * palette so every node on the chart carries its state's colour.
+ */
+function extraClassDefs(graph: Graph, base: string[], theme: Theme): string[] {
+  const palette = theme === "light" ? DEFAULT_THEME.light : DEFAULT_THEME.dark;
+  const out: string[] = [];
+  const seen = new Set<string>();
+  for (const n of graph.nodes) {
+    if (seen.has(n.state) || base.some((l) => l.includes(`classDef st_${n.state} `))) continue;
+    seen.add(n.state);
+    const ink = palette.states[n.state] ?? palette.neutral;
+    out.push(
+      `  classDef st_${n.state} fill:${ink.fill},stroke:${ink.accent},stroke-width:2px,color:${palette.ink},text-align:left;`,
+    );
+  }
+  return out;
 }
 
 // Actions: solid border. Results: thick border, saturated fill. Options: dashed.

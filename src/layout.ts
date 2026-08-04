@@ -1,5 +1,6 @@
 import type { FlowNode, Graph } from "./store.js";
 import type { Theme } from "./theme.js";
+import { KIND_LABEL } from "./theme.js";
 
 export interface Line {
   text: string;
@@ -101,8 +102,6 @@ const MAX_BULLET_LINES = 8;
 /** Bullets hang from a marker, so wrapped lines indent to clear it. */
 const MARKER_INDENT = 11;
 
-/** Mirrors the renderer's meta row so measurement matches what is drawn. */
-const KIND_TEXT: Record<string, string> = { action: "ACTION", result: "RESULT", options: "DECISION" };
 
 /** Always ends in an ellipsis: the caller uses it to signal dropped text. */
 function truncateToWidth(text: string, size: number, maxWidth: number, weight = 400): string {
@@ -141,6 +140,7 @@ export function measureNode(
   theme: Theme,
   showFigures: boolean,
   detail: Detail = "full",
+  kindLabels: Record<string, string> = KIND_LABEL,
 ): LaidOutNode {
   const { card, type } = theme;
   const chrome = card.padX * 2 + card.stripe;
@@ -185,8 +185,10 @@ export function measureNode(
 
   // Widest real line, so the card can give back space nothing is using. The
   // meta row is included — it is often the widest thing on a short card.
+  // Must match the string render.ts draws, or the card is measured wrong.
+  const kindText = (kindLabels[node.kind] ?? node.kind).toUpperCase();
   const metaW =
-    type.metaSize + 5 + textWidth(`${KIND_TEXT[node.kind] ?? node.kind.toUpperCase()} · ${node.state.toUpperCase()}`, type.metaSize, type.metaWeight);
+    type.metaSize + 5 + textWidth(`${kindText} · ${node.state.toUpperCase()}`, type.metaSize, type.metaWeight);
   const contentW = Math.max(
     metaW,
     ...titleLines.map((t) => textWidth(t, type.titleSize, type.titleWeight)),
@@ -297,8 +299,9 @@ export function layoutGraph(
   dagre: DagreLike,
   showFigures: boolean,
   detail: Detail = "full",
+  kindLabels: Record<string, string> = KIND_LABEL,
 ): LayoutResult {
-  const measured = graph.nodes.map((n) => measureNode(n, theme, showFigures, detail));
+  const measured = graph.nodes.map((n) => measureNode(n, theme, showFigures, detail, kindLabels));
   const byId = new Map(measured.map((m) => [m.id, m]));
   const vertical = graph.direction === "TD" || graph.direction === "BT";
 

@@ -1,7 +1,10 @@
 import type { LaidOutNode, LayoutResult } from "./layout.js";
 import { textWidth } from "./layout.js";
 import type { Palette, Theme } from "./theme.js";
-import { KIND_LABEL, STATE_GLYPH } from "./theme.js";
+import { KIND_LABEL, STATE_GLYPH, inkFor } from "./theme.js";
+import { DEFAULT_VOCAB, pulseStates } from "./vocab.js";
+
+const DEFAULT_PULSE_STATES = pulseStates(DEFAULT_VOCAB);
 
 export const esc = (s: string): string =>
   String(s).replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[c]!);
@@ -14,19 +17,25 @@ export interface RenderOptions {
   selectedId?: string | null;
   /** Offline export inlines figures and drops interaction affordances. */
   interactive?: boolean;
+  /** Vocabulary lookups; default to the builtin template when absent. */
+  glyphs?: Record<string, string>;
+  kindLabels?: Record<string, string>;
+  /** States drawn as in-flight; the stripe pulses for these. */
+  pulseStates?: readonly string[];
 }
 
 function card(n: LaidOutNode, o: RenderOptions): string {
   const { theme, palette } = o;
   const { card: c, type } = theme;
-  const ink = palette.states[n.node.state] ?? palette.states.planned;
+  const ink = inkFor(palette, n.node.state);
   const selected = o.selectedId === n.id;
   const strokeW = selected ? c.selectedWidth : c.borderWidth;
   const stroke = selected ? palette.focus : ink.border;
 
   const parts: string[] = [];
+  const pulse = (o.pulseStates ?? DEFAULT_PULSE_STATES).includes(n.node.state) ? " data-pulse=\"\"" : "";
   parts.push(
-    `<g class="skym-node" data-id="${esc(n.id)}" data-state="${esc(n.node.state)}" transform="translate(${n.x.toFixed(1)},${n.y.toFixed(1)})">`,
+    `<g class="skym-node" data-id="${esc(n.id)}" data-state="${esc(n.node.state)}"${pulse} transform="translate(${n.x.toFixed(1)},${n.y.toFixed(1)})">`,
   );
 
   parts.push(
@@ -44,8 +53,8 @@ function card(n: LaidOutNode, o: RenderOptions): string {
 
   // Meta row: glyph + kind, the label pairing that lets colour stay in the
   // 6–8 CVD band legally.
-  const glyph = STATE_GLYPH[n.node.state] ?? "•";
-  const kind = KIND_LABEL[n.node.kind] ?? n.node.kind;
+  const glyph = (o.glyphs ?? STATE_GLYPH)[n.node.state] ?? "•";
+  const kind = (o.kindLabels ?? KIND_LABEL)[n.node.kind] ?? n.node.kind;
   const metaBaseline = y + type.metaSize;
   parts.push(
     `<text class="skym-glyph" x="${left}" y="${metaBaseline.toFixed(1)}" fill="${ink.accent}" ` +

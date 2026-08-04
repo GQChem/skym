@@ -1,30 +1,64 @@
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import type { ThemeOverride } from "./theme.js";
+import { resolveTheme, themeForVocab, DEFAULT_THEME, type Theme, type ThemeOverride } from "./theme.js";
+import { DEFAULT_VOCAB, resolveVocab, type Vocabulary, type VocabOverride } from "./vocab.js";
 
-export interface ThemeConfig {
-  user?: ThemeOverride;
-  project?: ThemeOverride;
+export interface SkymConfig {
+  theme?: ThemeOverride;
+  vocab?: VocabOverride;
+  /** Where charts are written. The service tier makes this meaningful. */
+  storage?: "local" | "service" | "both";
 }
 
-const USER_FILE = path.join(os.homedir(), ".skym", "theme.json");
-const PROJECT_FILE = path.join(".skym", "theme.json");
+export interface ResolvedConfig {
+  theme: Theme;
+  vocab: Vocabulary;
+  storage: "local" | "service" | "both";
+}
 
-function read(file: string): ThemeOverride | undefined {
+const USER_FILE = path.join(os.homedir(), ".skym", "config.json");
+const PROJECT_FILE = path.join(".skym", "config.json");
+
+/** The pre-vocab layout kept theme keys at the top level. */
+const LEGACY_USER_FILE = path.join(os.homedir(), ".skym", "theme.json");
+const LEGACY_PROJECT_FILE = path.join(".skym", "theme.json");
+
+function read(file: string): SkymConfig | undefined {
   try {
     const parsed = JSON.parse(fs.readFileSync(file, "utf8"));
-    return parsed && typeof parsed === "object" ? (parsed as ThemeOverride) : undefined;
+    return parsed && typeof parsed === "object" ? (parsed as SkymConfig) : undefined;
   } catch {
     // Absent or malformed config must never take the viewer down.
     return undefined;
   }
 }
 
+/** A bare theme.json is read as { theme: ... } so old configs keep working. */
+function readLayer(configFile: string, legacyFile: string): SkymConfig | undefined {
+  const current = read(configFile);
+  if (current) return current;
+  const legacy = read(legacyFile);
+  return legacy ? { theme: legacy as ThemeOverride } : undefined;
+}
+
 /** Project settings win over user settings; both are optional. */
-export function loadThemeConfig(projectDir: string): ThemeConfig {
-  return {
-    user: read(USER_FILE),
-    project: read(path.join(projectDir, PROJECT_FILE)),
-  };
+export function loadConfig(projectDir: string): ResolvedConfig {
+  const user = readLayer(USER_FILE, LEGACY_USER_FILE);
+  const project = readLayer(path.join(projectDir, PROJECT_FILE), path.join(projectDir, LEGACY_PROJECT_FILE));
+
+  const vocab = resolveVocab(DEFAULT_VOCAB, user?.vocab, project?.vocab);
+  // The vocabulary owns its state inks, so it is folded in before overrides so
+  // a config can still restyle an individual state on top.
+  const theme = resolveTheme(themeForVocab(DEFAULT_THEME, vocab), user?.theme, project?.theme);
+
+  return { theme, vocab, storage: project?.storage ?? user?.storage ?? "local" };
+}
+
+/** What the viewer needs to draw and label a chart it did not lay out. */
+export function clientConfig(c: ResolvedConfig): {
+  theme: Theme;
+  vocab: Vocabulary;
+} {
+  return { theme: c.theme, vocab: c.vocab };
 }

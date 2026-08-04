@@ -2,7 +2,7 @@ import http from "node:http";
 import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { loadThemeConfig } from "./config.js";
+import { clientConfig, loadConfig } from "./config.js";
 import type { GraphStore } from "./store.js";
 
 const here = path.dirname(fileURLToPath(import.meta.url));
@@ -83,7 +83,8 @@ export async function startViewer(
     // Card appearance is configurable per user and per project.
     if (pathname === "/config") {
       res.writeHead(200, { "Content-Type": "application/json; charset=utf-8" });
-      res.end(JSON.stringify(loadThemeConfig(projectDir)));
+      // Resolved server-side so the viewer never re-implements the merge order.
+      res.end(JSON.stringify(clientConfig(loadConfig(projectDir))));
       return;
     }
 

@@ -14,34 +14,13 @@ import {
   type Op,
 } from "./ops.js";
 
-export type NodeKind = "action" | "result" | "options" | "note";
-
-/** Actions carry progress; results carry quality; options are a fork with unexplored branches. */
-export type ActionState = "planned" | "exploring" | "waiting" | "done" | "abandoned" | "blocked";
-export type ResultState = "good" | "bad" | "mixed" | "inconclusive";
-export type OptionsState = "open" | "resolved";
-/** A note is standing context: it holds while it is true, then stops. */
-export type NoteState = "active" | "retired";
-export type NodeState = ActionState | ResultState | OptionsState | NoteState;
-
-export const ACTION_STATES: ActionState[] = ["planned", "exploring", "waiting", "done", "abandoned", "blocked"];
-export const RESULT_STATES: ResultState[] = ["good", "bad", "mixed", "inconclusive"];
-export const OPTIONS_STATES: OptionsState[] = ["open", "resolved"];
-export const NOTE_STATES: NoteState[] = ["active", "retired"];
-
-export const STATES_FOR: Record<NodeKind, readonly NodeState[]> = {
-  action: ACTION_STATES,
-  result: RESULT_STATES,
-  options: OPTIONS_STATES,
-  note: NOTE_STATES,
-};
-
-export const DEFAULT_STATE: Record<NodeKind, NodeState> = {
-  action: "planned",
-  result: "inconclusive",
-  options: "open",
-  note: "active",
-};
+/**
+ * Kinds and states are open strings: the vocabulary is per-project data (see
+ * vocab.ts), and what is on disk must load under any template. Validation lives
+ * at the tool boundary, not in the type.
+ */
+export type NodeKind = string;
+export type NodeState = string;
 
 export type Direction = "TD" | "LR" | "BT" | "RL";
 

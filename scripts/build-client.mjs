@@ -8,7 +8,7 @@ import { fileURLToPath } from "node:url";
  * which browsers accept as-is — this just stages them plus dagre under public/.
  */
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
-const shared = ["theme.js", "layout.js", "render.js"];
+const shared = ["vocab.js", "theme.js", "layout.js", "render.js"];
 const outDir = path.join(root, "public", "vendor");
 
 fs.mkdirSync(outDir, { recursive: true });
