@@ -18,15 +18,7 @@ import { buildGraph, ingest } from "../dist/service/src/ingest.js";
  * never implies coverage it does not have.
  */
 const url = process.env.TEST_DATABASE_URL;
-
-// Railway's private hostname only resolves inside its network, so `railway
-// run` forwards a URL that cannot be reached from a laptop. Say so plainly
-// rather than failing six times with a DNS error.
-const unreachable = url?.includes(".railway.internal")
-  ? "TEST_DATABASE_URL points at Railway's private host, which only resolves inside Railway. Use DATABASE_PUBLIC_URL or a local Postgres."
-  : null;
-
-const skip = unreachable ?? (url ? false : "TEST_DATABASE_URL not set — skipping ingest integration tests");
+const skip = url ? false : "TEST_DATABASE_URL not set — skipping ingest integration tests";
 
 let pool;
 let userId;
