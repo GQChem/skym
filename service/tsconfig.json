@@ -5,13 +5,21 @@
     "moduleResolution": "NodeNext",
     "lib": ["ES2023"],
     "outDir": "dist",
-    "rootDir": "src",
+    // The service imports shared modules from the parent package's source, so
+    // the compilation spans both trees and output lands under dist/service/.
+    // Importing the parent's build output instead would make this project
+    // depend on another build having already run, which broke the deploy.
+    "rootDir": "..",
     "strict": true,
-    "noUncheckedIndexedAccess": true,
+    // Deliberately matches the parent's settings rather than tightening them:
+    // this compilation includes parent source, and store.ts pulls in the
+    // offline exporter and the renderer behind it. Holding those to rules they
+    // were not written for fails the build over code the service never runs.
+    "noUncheckedIndexedAccess": false,
     "esModuleInterop": true,
     "skipLibCheck": true,
-    "declaration": true,
+    "declaration": false,
     "sourceMap": true
   },
-  "include": ["src/**/*.ts"]
+  "include": ["src/**/*.ts", "../src/**/*.ts"]
 }

@@ -1,9 +1,9 @@
 import type { PoolClient } from "pg";
 import type { Pool } from "./db.js";
 import { tx } from "./db.js";
-import { apply, emptyGraph, type Entry } from "../../dist/ops.js";
-import type { Graph } from "../../dist/store.js";
-import { checkBullets, checkEdge, checkNodeCeiling, ValidationError } from "../../dist/validate.js";
+import { apply, emptyGraph, type Entry } from "../../src/ops.js";
+import type { Graph } from "../../src/store.js";
+import { checkBullets, checkEdge, checkNodeCeiling, ValidationError } from "../../src/validate.js";
 
 export interface IngestResult {
   /** Ops actually written, in the order the server assigned. */

@@ -27,7 +27,7 @@ import {
 } from "./oauth.js";
 import { buildGraph, ingest } from "./ingest.js";
 import { tx } from "./db.js";
-import type { Entry } from "../../dist/ops.js";
+import type { Entry } from "../../src/ops.js";
 
 const MAX_BODY = 4 * 1024 * 1024;
 const publicDir = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..", "public");

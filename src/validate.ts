@@ -46,7 +46,7 @@ export function checkBullets(bullets: string[] | undefined): void {
 export function checkState(vocab: Vocabulary, kind: string, state: string | undefined): string | undefined {
   if (state === undefined) return undefined;
   const allowed = statesFor(vocab)[kind];
-  if (!allowed) fail(`Unknown node kind "${kind}".`);
+  if (!allowed) return fail(`Unknown node kind "${kind}".`);
   if (!allowed.includes(state)) {
     fail(`State "${state}" is not valid for a ${kind} node. Use one of: ${allowed.join(", ")}.`);
   }

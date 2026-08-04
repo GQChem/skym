@@ -314,7 +314,8 @@ export function resolveVocab(base: Vocabulary, ...overrides: (VocabOverride | un
   let out = base;
   for (const o of overrides) {
     if (!o) continue;
-    if (o.template && BUILTIN_TEMPLATES[o.template]) out = BUILTIN_TEMPLATES[o.template];
+    const named = o.template ? BUILTIN_TEMPLATES[o.template] : undefined;
+    if (named) out = named;
     if (!o.kinds) continue;
     const byslug = new Map(out.kinds.map((k) => [k.slug, k]));
     for (const patch of o.kinds) {

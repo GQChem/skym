@@ -6,7 +6,7 @@
   "description": "Hosted charts, accounts, and the remote command queue for skym-flow.",
   "scripts": {
     "build": "tsc",
-    "start": "node dist/main.js",
+    "start": "node dist/service/src/main.js",
     "dev": "tsc --watch",
     "test": "npm run build && node --test \"test/*.test.js\""
   },

@@ -6,7 +6,7 @@ process.env.GOOGLE_CLIENT_ID = "gid";
 process.env.GOOGLE_CLIENT_SECRET = "gsecret";
 
 const { authorizeUrl, configuredProviders, isConfigured, signState, verifyState } = await import(
-  "../dist/oauth.js"
+  "../dist/service/src/oauth.js"
 );
 
 test("a signed state round-trips", () => {

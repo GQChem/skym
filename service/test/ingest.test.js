@@ -1,8 +1,8 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { randomUUID } from "node:crypto";
-import { makePool, migrate, tx } from "../dist/db.js";
-import { buildGraph, ingest } from "../dist/ingest.js";
+import { makePool, migrate, tx } from "../dist/service/src/db.js";
+import { buildGraph, ingest } from "../dist/service/src/ingest.js";
 
 /**
  * Integration tests against a real Postgres — the ingest guarantees (server

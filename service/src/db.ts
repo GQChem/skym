@@ -4,7 +4,7 @@ import { fileURLToPath } from "node:url";
 import pg from "pg";
 
 const here = path.dirname(fileURLToPath(import.meta.url));
-const migrationsDir = path.resolve(here, "..", "migrations");
+const migrationsDir = path.resolve(here, "..", "..", "..", "migrations");
 
 export type Pool = pg.Pool;
 

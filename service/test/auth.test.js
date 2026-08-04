@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { hashToken, newToken, safeEqual } from "../dist/auth.js";
+import { hashToken, newToken, safeEqual } from "../dist/service/src/auth.js";
 
 // The DB-backed halves of auth are covered in ingest.test.js's environment;
 // these are the pure pieces, which are also the ones worth getting wrong-proof.
