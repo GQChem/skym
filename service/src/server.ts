@@ -175,6 +175,38 @@ async function route({ pool, req, res, url }: Ctx): Promise<void> {
     return json(res, 200, { count: r.rows.length, charts: r.rows });
   }
 
+  // The integration tests create a project per run and never clean up, so a
+  // production run leaves its scaffolding behind for good. Matches only the
+  // generated name, and reports what it would remove unless told to commit.
+  if (pathname === "/api/admin/purge-test-projects" && method === "POST") {
+    const secret = process.env.ADMIN_TOKEN;
+    if (!secret) return json(res, 404, { error: "not found" });
+    if (bearer(req) !== secret) return json(res, 401, { error: "unauthorized" });
+
+    const body = await readJson<{ confirm?: boolean }>(req);
+    const doomed = await pool.query<{ id: string; name: string }>(
+      "SELECT id, name FROM projects WHERE name ~ '^(skym-)?proj-[A-Za-z0-9]{8}$'",
+    );
+    if (!body.confirm) {
+      return json(res, 200, { dryRun: true, projects: doomed.rows.length, names: doomed.rows.map((p) => p.name) });
+    }
+
+    // Blobs first: charts cascade from the project, and a figure row that
+    // vanishes with its chart would strand its bytes on the volume forever.
+    const ids = doomed.rows.map((p) => p.id);
+    if (ids.length) {
+      const blobs = await pool.query<{ storage_key: string }>(
+        `SELECT f.storage_key FROM figures f
+           JOIN charts c ON c.id = f.chart_id
+          WHERE c.project_id = ANY($1::uuid[])`,
+        [ids],
+      );
+      for (const b of blobs.rows) removeBlob(b.storage_key);
+      await pool.query("DELETE FROM projects WHERE id = ANY($1::uuid[])", [ids]);
+    }
+    return json(res, 200, { deleted: ids.length });
+  }
+
   const authStart = pathname.match(/^\/auth\/(google|github)$/);
   if (authStart && method === "GET") {
     const name = authStart[1] as ProviderName;
