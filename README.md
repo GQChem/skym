@@ -150,11 +150,25 @@ Or define a kind of your own, which is added alongside the template's:
 
 A state may also set `"pulse": true` to animate the card's stripe while the work is live, and `"open": true` to count as unresolved in `flow_find`. Charts are stored with their kind and state as plain strings, so a chart written under one template still opens under another — an unrecognised state simply draws in neutral ink.
 
+## The service
+
+Charts live on the hosted service — that is where the viewer is, and it needs no setup. The first `flow_init` prints a short code and opens a browser; approve it once and every chart from that machine syncs.
+
+```
+Connect this agent to skym: open https://skym-production.up.railway.app/pair and enter code ABCD-EFGH
+```
+
+The token is stored in `~/.skym/credentials.json`, so pairing happens once per machine, not once per project. Charts are grouped by git remote, so every chat in a repo lands under the same project without anyone creating one.
+
+Local `.flows/` files are still written alongside (`"storage": "service"` turns that off), so a chart stays greppable and committable.
+
 ## Configuration
+
+Everything below is optional — the defaults are the product.
 
 | Env var | Default | Meaning |
 | --- | --- | --- |
-| `SKYM_PORT` | `7373` | Preferred port; probes upward if taken. |
+| `SKYM_SERVICE_URL` | the hosted service | Point at a different deploy, e.g. a self-hosted one. |
 | `SKYM_PROJECT_DIR` | cwd | Project root — `.flows/` is created here. |
 | `SKYM_STATE_DIR` | `<project>/.flows` | Override the chart location entirely. |
 | `SKYM_CHART_ID` | slug of title | Pin a chart directory, e.g. to resume one. |

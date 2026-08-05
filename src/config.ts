@@ -7,17 +7,20 @@ import { DEFAULT_VOCAB, resolveVocab, type Vocabulary, type VocabOverride } from
 export interface SkymConfig {
   theme?: ThemeOverride;
   vocab?: VocabOverride;
-  /** Where charts are written. The service tier makes this meaningful. */
-  storage?: "local" | "service" | "both";
-  /** Base URL of the hosted service; absent means local-only. */
+  /**
+   * Whether local files are written alongside the service copy. Charts sync
+   * either way — this only decides if `.flows/` is also kept on disk.
+   */
+  storage?: "service" | "both";
+  /** Base URL of the service; defaults to the hosted one. */
   service?: string;
 }
 
 export interface ResolvedConfig {
   theme: Theme;
   vocab: Vocabulary;
-  storage: "local" | "service" | "both";
-  service?: string;
+  storage: "service" | "both";
+  service: string;
 }
 
 const USER_FILE = path.join(os.homedir(), ".skym", "config.json");
@@ -45,6 +48,13 @@ function readLayer(configFile: string, legacyFile: string): SkymConfig | undefin
   return legacy ? { theme: legacy as ThemeOverride } : undefined;
 }
 
+/**
+ * Charts live on the service, so it is the default rather than something to
+ * configure. `service` in config or SKYM_SERVICE_URL points at a different
+ * deploy — a self-hosted one, or a dev instance.
+ */
+const DEFAULT_SERVICE = "https://skym-production.up.railway.app";
+
 /** Project settings win over user settings; both are optional. */
 export function loadConfig(projectDir: string): ResolvedConfig {
   const user = readLayer(USER_FILE, LEGACY_USER_FILE);
@@ -58,9 +68,10 @@ export function loadConfig(projectDir: string): ResolvedConfig {
   return {
     theme,
     vocab,
-    storage: project?.storage ?? user?.storage ?? "local",
-    // SKYM_SERVICE_URL wins so a deploy can be pointed at without editing config.
-    service: process.env.SKYM_SERVICE_URL ?? project?.service ?? user?.service,
+    // "both" keeps the local files a user may already be committing, while the
+    // service becomes the copy that outlives the machine.
+    storage: project?.storage ?? user?.storage ?? "both",
+    service: process.env.SKYM_SERVICE_URL || project?.service || user?.service || DEFAULT_SERVICE,
   };
 }
 

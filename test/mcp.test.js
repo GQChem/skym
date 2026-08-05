@@ -6,7 +6,16 @@ import path from "node:path";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js";
 
-let port = 7500;
+/**
+ * Tests run against the deployed service by default, so what they exercise is
+ * what ships. SKYM_TEST_SERVICE points elsewhere — a dev deploy, or an
+ * unreachable address for an offline run.
+ *
+ * The agent is unpaired here, so flow_init reports a pairing code and the
+ * chart stays local; that is the path these tests cover. Verifying a *paired*
+ * agent end to end needs a token and is not something a unit test should mint.
+ */
+const SERVICE_URL = process.env.SKYM_TEST_SERVICE ?? "https://skym-production.up.railway.app";
 
 /** Boots the real server over stdio, as Claude Code does. */
 async function boot(vocab) {
@@ -26,9 +35,10 @@ async function boot(vocab) {
       env: {
         ...process.env,
         SKYM_NO_OPEN: "1",
+        SKYM_SERVICE_URL: SERVICE_URL,
         SKYM_STATE_DIR: root,
         SKYM_PROJECT_DIR: projectDir,
-        SKYM_PORT: String(port++),
+
       },
     }),
   );

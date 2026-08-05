@@ -26,10 +26,9 @@ import {
   writeCredentials,
   type PairingPrompt,
 } from "./sync.js";
-import { startViewer, type Viewer } from "./server.js";
+
 
 const projectDir = process.env.SKYM_PROJECT_DIR ?? process.cwd();
-const preferredPort = Number(process.env.SKYM_PORT ?? 7373);
 const autoOpen = process.env.SKYM_NO_OPEN !== "1";
 
 // Charts live in the project so they are visible and committable.
@@ -44,7 +43,7 @@ const store = new GraphStore(root, chartId, "Untitled chart");
 const config = loadConfig(projectDir);
 const vocab = config.vocab;
 const OPEN_STATES = openStates(vocab);
-let viewer: Viewer | null = null;
+
 let opened = false;
 let sync: SyncClient | null = null;
 let pairingPrompt: PairingPrompt | null = null;
@@ -74,7 +73,7 @@ function openBrowser(url: string): void {
  * the chart keeps working locally in the meantime.
  */
 async function ensureSync(): Promise<string | null> {
-  if (!config.service || config.storage === "local") return null;
+  if (!config.service) return null;
   if (sync) return null;
 
   const creds = readCredentials();
@@ -145,12 +144,21 @@ function repoKey(): string | undefined {
   return path.basename(projectDir);
 }
 
-async function ensureViewer(): Promise<Viewer> {
-  if (!viewer) viewer = await startViewer(store, preferredPort, projectDir);
-  openBrowser(`${viewer.url}?chart=${store.chartId}`);
+/**
+ * The chart lives on the service, so that is what the browser opens. There is
+ * one viewer at one URL — no local server, and no second copy of the UI that
+ * can drift from it.
+ */
+function chartUrl(): string {
+  return `${config.service.replace(/\/$/, "")}/chart?chart=${encodeURIComponent(store.chartId)}`;
+}
+
+async function ensureViewer(): Promise<string> {
+  const url = chartUrl();
+  openBrowser(url);
   // Approval happens in a browser mid-session, so retry until it lands.
-  if (!sync && config.service && config.storage !== "local") await ensureSync().catch(() => null);
-  return viewer;
+  if (!sync) await ensureSync().catch(() => null);
+  return url;
 }
 
 const server = new McpServer({ name: "skym-flow", version: "0.2.0" });
@@ -164,7 +172,7 @@ function summary(lead: string, hint?: string): string {
     return a;
   }, {});
   const tally = Object.entries(byState).map(([k, v]) => `${v} ${k}`).join(", ") || "empty";
-  const url = viewer ? `${viewer.url}?chart=${store.chartId}` : "(viewer not started)";
+  const url = chartUrl();
   return [lead, hint, `"${g.title}" rev ${g.revision} · ${g.nodes.length} nodes (${tally}) · ${url}`]
     .filter(Boolean)
     .join("\n");
@@ -229,8 +237,8 @@ server.registerTool(
           ? "Continue the existing tree — check current states before adding nodes, and reuse existing ids to update them."
           : "Next: add an options node for the choices you see, or an action node for what you're doing first.",
       ) +
-        `\nViewer: ${v.url}?chart=${store.chartId}` +
-        (syncNote ? `\n\n${syncNote}` : sync ? `\nSynced to ${config.service}` : ""),
+        `\nViewer: ${v}` +
+        (syncNote ? `\n\n${syncNote}` : ""),
     );
   },
 );
@@ -613,7 +621,7 @@ server.registerTool(
           .join("\n");
     }
     return ok(
-      `${summary(`Viewer: ${v.url}?chart=${store.chartId}`)}${extra}\n\n\`\`\`mermaid\n${toMermaid(store.get())}\n\`\`\``,
+      `${summary(`Viewer: ${v}`)}${extra}\n\n\`\`\`mermaid\n${toMermaid(store.get())}\n\`\`\``,
     );
   },
 );
@@ -629,7 +637,7 @@ server.registerResource(
 
 const shutdown = () => {
   store.release();
-  viewer?.close();
+
   if (!sync) process.exit(0);
   // Give the queue a moment to drain rather than dropping the last ops.
   const bail = setTimeout(() => process.exit(0), 3000);
