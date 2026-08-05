@@ -7,8 +7,11 @@ import { SyncClient, awaitPairing, startPairing } from "../dist/sync.js";
 function stubFetch(handler) {
   const calls = [];
   const impl = async (url, init = {}) => {
-    const body = init.body ? JSON.parse(init.body) : undefined;
-    calls.push({ url: String(url), method: init.method ?? "GET", body, headers: init.headers ?? {} });
+    // Figure uploads send bytes, not JSON; those are recorded raw.
+    const raw = init.body;
+    const body = typeof raw === "string" ? JSON.parse(raw) : undefined;
+    const bytes = raw && typeof raw !== "string" ? Buffer.from(raw) : undefined;
+    calls.push({ url: String(url), method: init.method ?? "GET", body, bytes, headers: init.headers ?? {} });
     const out = await handler({ url: String(url), body, n: calls.length });
     return {
       ok: out.status === undefined || (out.status >= 200 && out.status < 300),
@@ -192,6 +195,153 @@ test("ops committed to a store land in the sync queue", async () => {
   const ids = posted[0].body.ops.map((o) => o.id);
   assert.ok(ids.every(Boolean), "every shipped op carries an id");
   assert.equal(new Set(ids).size, ids.length, "no duplicates in the batch");
+  await c.close();
+});
+
+// --- figures: the op names a file, the bytes travel separately ---
+
+const figureStub = (missing = ["fig.png"]) =>
+  stubFetch(({ url }) => {
+    if (url.endsWith("/attach")) return { body: { chartId: "remote-1" } };
+    if (url.endsWith("/figures/missing")) return { body: { missing } };
+    return { body: { accepted: [], revision: 0 } };
+  });
+
+test("a queued figure uploads its bytes after the ops", async () => {
+  const fs = await import("node:fs");
+  const os = await import("node:os");
+  const path = await import("node:path");
+
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "skym-fig-"));
+  const file = "fig.png";
+  fs.writeFileSync(path.join(dir, file), Buffer.from([0x89, 0x50, 0x4e, 0x47]));
+
+  const f = figureStub();
+  const c = await client(f);
+  c.enqueue(entry("a", 1));
+  c.enqueueFigure({ file, path: path.join(dir, file), mime: "image/png" });
+  await c.flush();
+
+  const put = f.calls.find((x) => x.method === "PUT");
+  assert.ok(put, "the blob is uploaded");
+  assert.match(put.url, /\/figures\/fig\.png$/);
+  assert.equal(put.headers["Content-Type"], "image/png");
+  assert.deepEqual([...put.bytes], [0x89, 0x50, 0x4e, 0x47], "the actual bytes are sent");
+
+  // The ops batch must land first: bytes are meaningless without their op.
+  const opsAt = f.calls.findIndex((x) => x.url.includes("/ops"));
+  const putAt = f.calls.indexOf(put);
+  assert.ok(opsAt < putAt, "ops ship before the blobs that reference them");
+
+  assert.equal(c.pending, 0, "a delivered figure leaves the queue");
+  await c.close();
+});
+
+test("a figure the service already holds is not re-uploaded", async () => {
+  const fs = await import("node:fs");
+  const os = await import("node:os");
+  const path = await import("node:path");
+
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "skym-fig-"));
+  fs.writeFileSync(path.join(dir, "fig.png"), Buffer.from([1, 2, 3]));
+
+  // The server reports nothing missing, as it would on a resumed sync.
+  const f = figureStub([]);
+  const c = await client(f);
+  c.enqueueFigure({ file: "fig.png", path: path.join(dir, "fig.png"), mime: "image/png" });
+  await c.flush();
+
+  assert.equal(f.calls.filter((x) => x.method === "PUT").length, 0, "no blob re-sent");
+  assert.equal(c.pending, 0, "it is still dropped from the queue");
+  await c.close();
+});
+
+test("a figure whose file vanished is dropped, not retried forever", async () => {
+  const f = figureStub();
+  const c = await client(f);
+  c.enqueueFigure({ file: "fig.png", path: "/definitely/not/here.png", mime: "image/png" });
+  await c.flush();
+
+  assert.equal(f.calls.filter((x) => x.method === "PUT").length, 0);
+  assert.equal(c.pending, 0, "a missing asset cannot block the queue");
+  assert.equal(c.lastError, null);
+  await c.close();
+});
+
+test("attaching a figure to a store queues both the op and its bytes", async () => {
+  const { GraphStore } = await import("../dist/store.js");
+  const fs = await import("node:fs");
+  const os = await import("node:os");
+  const path = await import("node:path");
+
+  // The store generates its own timestamped filename, so the stub echoes back
+  // whatever it is asked about rather than naming one.
+  const f = stubFetch(({ url, body }) => {
+    if (url.endsWith("/attach")) return { body: { chartId: "remote-1" } };
+    if (url.endsWith("/figures/missing")) return { body: { missing: body.files } };
+    return { body: { accepted: [], revision: 0 } };
+  });
+  const c = await client(f);
+
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "skym-sync-"));
+  const store = new GraphStore(root, "figs", "Figs");
+  // The wiring index.ts installs: ops queue, and figure.add also queues bytes.
+  store.subscribe((_g, entry) => {
+    if (!entry) return;
+    c.enqueue(entry);
+    if (entry.op.t === "figure.add") {
+      c.enqueueFigure({
+        file: entry.op.figure.file,
+        path: path.join(store.assetsDir, entry.op.figure.file),
+        mime: entry.op.figure.mime ?? "image/png",
+      });
+    }
+  });
+
+  store.init("Figs");
+  store.upsertNode({ id: "a", title: "A", kind: "action" });
+  store.attachFigure("a", Buffer.from([7, 7, 7]), "image/png", "a caption");
+  store.release();
+
+  assert.ok(c.pending >= 3, `expected ops plus a figure, got ${c.pending}`);
+
+  await c.flush();
+  const put = f.calls.find((x) => x.method === "PUT");
+  assert.ok(put, "the figure's bytes follow its op to the service");
+  assert.deepEqual([...put.bytes], [7, 7, 7], "the bytes written to disk are the ones sent");
+  assert.equal(c.pending, 0);
+  await c.close();
+});
+
+test("a figure refused for quota is dropped, and the reason survives", async () => {
+  const fs = await import("node:fs");
+  const os = await import("node:os");
+  const path = await import("node:path");
+
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "skym-fig-"));
+  fs.writeFileSync(path.join(dir, "big.png"), Buffer.from([1, 2, 3]));
+
+  const errors = [];
+  const f = stubFetch(({ url }) => {
+    if (url.endsWith("/attach")) return { body: { chartId: "remote-1" } };
+    if (url.endsWith("/figures/missing")) return { body: { missing: ["big.png"] } };
+    if (url.includes("/figures/")) return { status: 507, body: { error: "storage quota exceeded" } };
+    return { body: { accepted: [], revision: 0 } };
+  });
+  const c = await client(f, { onError: (e) => errors.push(e.message) });
+
+  c.enqueue(entry("a", 1));
+  c.enqueueFigure({ file: "big.png", path: path.join(dir, "big.png"), mime: "image/png" });
+  await c.flush();
+
+  assert.equal(c.pending, 0, "an over-quota blob is not retried forever");
+  assert.match(c.lastError ?? "", /507|quota/, "the reason outlives the successful flush");
+  assert.equal(errors.length, 1, "the user is told once");
+
+  // A second flush must not re-send it.
+  const puts = f.calls.filter((x) => x.method === "PUT").length;
+  await c.flush();
+  assert.equal(f.calls.filter((x) => x.method === "PUT").length, puts, "no retry");
   await c.close();
 });
 

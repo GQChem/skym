@@ -26,6 +26,7 @@ import {
   type ProviderName,
 } from "./oauth.js";
 import { buildGraph, ingest } from "./ingest.js";
+import { QuotaExceeded, findFigure, haveFigures, putFigure, usageFor } from "./figures.js";
 import { tx } from "./db.js";
 import type { Entry } from "../../src/ops.js";
 
@@ -43,15 +44,19 @@ const json = (res: http.ServerResponse, status: number, body: unknown): void => 
   res.end(text);
 };
 
-async function readJson<T>(req: http.IncomingMessage): Promise<T> {
+async function readBody(req: http.IncomingMessage, limit = MAX_BODY): Promise<Buffer> {
   const chunks: Buffer[] = [];
   let size = 0;
   for await (const chunk of req) {
     size += (chunk as Buffer).length;
-    if (size > MAX_BODY) throw new Error("body too large");
+    if (size > limit) throw new Error("body too large");
     chunks.push(chunk as Buffer);
   }
-  return JSON.parse(Buffer.concat(chunks).toString("utf8") || "{}") as T;
+  return Buffer.concat(chunks);
+}
+
+async function readJson<T>(req: http.IncomingMessage): Promise<T> {
+  return JSON.parse((await readBody(req)).toString("utf8") || "{}") as T;
 }
 
 const bearer = (req: http.IncomingMessage): string | null => {
@@ -203,7 +208,7 @@ async function route({ pool, req, res, url }: Ctx): Promise<void> {
 
   // Pages and their assets are public; the data behind them is not. Gating
   // these too would 401 the very scripts that render the sign-in page.
-  if (method === "GET" && !pathname.startsWith("/api/") && !isDataRoute(pathname)) {
+  if (method === "GET" && !pathname.startsWith("/api/") && !isDataRoute(pathname) && !isFigureRoute(pathname)) {
     return serveStatic(res, pathname);
   }
 
@@ -215,6 +220,70 @@ async function route({ pool, req, res, url }: Ctx): Promise<void> {
   if (pathname === "/api/me" && method === "GET") {
     const r = await pool.query("SELECT id, email, name, avatar_url FROM users WHERE id = $1", [who.userId]);
     return json(res, 200, { user: r.rows[0], via: who.via });
+  }
+
+  if (pathname === "/api/usage" && method === "GET") {
+    return json(res, 200, await usageFor(pool, who.userId));
+  }
+
+  // --- figures ---
+  //
+  // The op log references a figure by filename only, so the bytes travel on
+  // their own route. The viewer asks for /assets/<file>?chart=<id>, which is
+  // the same URL shape the local viewer uses — public/ runs unchanged.
+
+  if (isFigureRoute(pathname) && method === "GET") {
+    const file = decodeURIComponent(pathname.slice("/assets/".length));
+    const chartId = url.searchParams.get("chart") ?? (await firstChartFor(pool, who.userId));
+    if (!chartId) return json(res, 404, { error: "not found" });
+    if (!(await canAccessChart(pool, who.userId, chartId))) return json(res, 403, { error: "forbidden" });
+
+    const blob = await findFigure(pool, chartId, file);
+    if (!blob) return json(res, 404, { error: "not found" });
+    res.writeHead(200, {
+      "Content-Type": blob.mime,
+      // Figure filenames carry a timestamp, so a given name is immutable.
+      "Cache-Control": "private, max-age=31536000, immutable",
+      // An SVG is a document: navigated to directly it would run its own
+      // scripts on this origin. Figures are pixels here, never code.
+      "Content-Security-Policy": "default-src 'none'; style-src 'unsafe-inline'; sandbox",
+      "X-Content-Type-Options": "nosniff",
+      "Content-Disposition": `inline; filename="${path.basename(blob.path).replace(/[^\w.-]/g, "_")}"`,
+    });
+    fs.createReadStream(blob.path).pipe(res);
+    return;
+  }
+
+  // Lets the agent upload only what is actually missing, so a resumed sync
+  // does not re-send every blob it already pushed. Matched before the upload
+  // route, whose filename pattern would otherwise swallow "missing".
+  const figMissing = pathname.match(/^\/api\/charts\/([0-9a-f-]{36})\/figures\/missing$/i);
+  if (figMissing && method === "POST") {
+    const chartId = figMissing[1]!;
+    if (!(await canAccessChart(pool, who.userId, chartId))) return json(res, 403, { error: "forbidden" });
+    const body = await readJson<{ files?: string[] }>(req);
+    const files = Array.isArray(body.files) ? body.files : [];
+    const have = await haveFigures(pool, chartId, files);
+    return json(res, 200, { missing: files.filter((f) => !have.has(f.split(/[/\\]/).pop()!)) });
+  }
+
+  const figUpload = pathname.match(/^\/api\/charts\/([0-9a-f-]{36})\/figures\/(.+)$/i);
+  if (figUpload && method === "PUT") {
+    const chartId = figUpload[1]!;
+    if (!(await canAccessChart(pool, who.userId, chartId))) return json(res, 403, { error: "forbidden" });
+    const file = decodeURIComponent(figUpload[2]!);
+    const mime = (req.headers["content-type"] ?? "application/octet-stream").split(";")[0]!.trim();
+    try {
+      const stored = await putFigure(pool, chartId, file, mime, await readBody(req));
+      return json(res, 200, stored);
+    } catch (err) {
+      // Distinct from a malformed upload: the agent should report this to the
+      // user and stop retrying, not treat it as a transient failure.
+      if (err instanceof QuotaExceeded) {
+        return json(res, 507, { error: "storage quota exceeded", ...err.usage });
+      }
+      return json(res, 400, { error: (err as Error).message });
+    }
   }
 
   // --- the viewer's own endpoints ---
@@ -333,6 +402,9 @@ async function route({ pool, req, res, url }: Ctx): Promise<void> {
 const DATA_ROUTES = new Set(["/graph", "/charts", "/config", "/whoami", "/events"]);
 const isDataRoute = (pathname: string): boolean => DATA_ROUTES.has(pathname);
 
+/** Figure blobs are private: served only to someone who can see the chart. */
+const isFigureRoute = (pathname: string): boolean => pathname.startsWith("/assets/");
+
 const MIME: Record<string, string> = {
   ".html": "text/html; charset=utf-8",
   ".js": "text/javascript; charset=utf-8",
@@ -345,8 +417,17 @@ const MIME: Record<string, string> = {
  * Two roots: the service's own pages, and the viewer, which is the same
  * public/ the local server ships so there is one chart UI, not two.
  */
+/** Extensionless page URLs, so the nav links stay clean. */
+const PAGES: Record<string, string> = {
+  "/": "index.html",
+  "/dashboard": "dashboard.html",
+  "/settings": "settings.html",
+  // The pairing URL printed in the terminal; settings is where the code goes.
+  "/pair": "settings.html",
+};
+
 function serveStatic(res: http.ServerResponse, pathname: string): void {
-  const rel = pathname === "/" ? "index.html" : pathname.replace(/^\/+/, "");
+  const rel = PAGES[pathname] ?? pathname.replace(/^\/+/, "");
 
   let file = path.join(publicDir, rel);
   const inService = file.startsWith(publicDir) && fs.existsSync(file) && fs.statSync(file).isFile();

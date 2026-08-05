@@ -18,6 +18,7 @@ import { DEFAULT_THEME, paletteFor } from "./theme.js";
 import { loadConfig } from "./config.js";
 import { allStates, kindDef, openStates, type KindDef } from "./vocab.js";
 import { checkBullets, checkState } from "./validate.js";
+import type { Entry } from "./ops.js";
 import {
   SyncClient,
   clearPendingPairing,
@@ -140,13 +141,32 @@ async function ensureSync(): Promise<string | null> {
   // Without this the service only ever sees a chart from the moment it
   // connected, which for a first run is nothing at all. Re-sending is safe:
   // ops carry ids and the server dedupes.
-  for (const entry of store.readLog()) client.enqueue(entry);
+  for (const entry of store.readLog()) {
+    client.enqueue(entry);
+    queueFigure(client, entry);
+  }
 
   // Ops are queued as they commit; the client drains on its own timer.
   store.subscribe((_g, entry) => {
-    if (entry) client.enqueue(entry);
+    if (!entry) return;
+    client.enqueue(entry);
+    queueFigure(client, entry);
   });
   return null;
+}
+
+/**
+ * A figure.add op names a file but carries no bytes, so the blob is queued
+ * separately or the hosted viewer renders a broken image.
+ */
+function queueFigure(client: SyncClient, entry: Entry): void {
+  if (entry.op.t !== "figure.add") return;
+  const { file, mime } = entry.op.figure;
+  client.enqueueFigure({
+    file,
+    path: path.join(store.assetsDir, file),
+    mime: mime ?? "image/png",
+  });
 }
 
 const pairingNotice = (p: PairingPrompt): string =>

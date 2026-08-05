@@ -63,8 +63,23 @@ interface AttachInput {
   title: string;
 }
 
+/**
+ * A figure's bytes, queued alongside its op.
+ *
+ * The op log references a figure by filename only, so pushing ops alone leaves
+ * the hosted viewer with a reference and nothing to render. The blob is read
+ * from disk at flush time rather than held in memory: figures are megabytes,
+ * and a queue that never drains would otherwise pin all of them.
+ */
+interface PendingUpload {
+  file: string;
+  path: string;
+  mime: string;
+}
+
 export class SyncClient {
   private queue: Entry[] = [];
+  private uploads: PendingUpload[] = [];
   private timer: ReturnType<typeof setInterval> | null = null;
   private flushing = false;
   private failures = 0;
@@ -102,20 +117,34 @@ export class SyncClient {
     this.start();
   }
 
+  /** Queues a figure's bytes to follow its op. Same fire-and-forget contract. */
+  enqueueFigure(upload: PendingUpload): void {
+    this.uploads.push(upload);
+    this.start();
+  }
+
   get pending(): number {
-    return this.queue.length;
+    return this.queue.length + this.uploads.length;
   }
 
   async flush(): Promise<void> {
-    if (this.flushing || !this.queue.length || !this.remoteChartId) return;
+    if (this.flushing || !this.remoteChartId) return;
+    if (!this.queue.length && !this.uploads.length) return;
     this.flushing = true;
     // Take the batch, but keep it until the server confirms.
     const batch = this.queue.slice();
     try {
-      await this.call(`POST`, `/api/charts/${this.remoteChartId}/ops`, { ops: batch });
-      this.queue.splice(0, batch.length);
+      if (batch.length) {
+        await this.call(`POST`, `/api/charts/${this.remoteChartId}/ops`, { ops: batch });
+        this.queue.splice(0, batch.length);
+      }
+      // Ops first: a figure's bytes are only meaningful once the op that
+      // references them has landed.
+      const rejected = await this.flushUploads();
       this.failures = 0;
-      this.lastError = null;
+      // A rejection is not a transport failure — the flush succeeded — but the
+      // reason must survive it, or the user never learns the figure was lost.
+      if (!rejected) this.lastError = null;
     } catch (err) {
       this.failures += 1;
       this.lastError = (err as Error).message;
@@ -141,6 +170,77 @@ export class SyncClient {
     if (this.timer) clearInterval(this.timer);
     this.timer = null;
     await this.flush().catch(() => {});
+  }
+
+  /**
+   * Uploads only the blobs the service does not already hold, so a resumed
+   * sync re-sends ops (which are cheap and idempotent) but not megabytes.
+   */
+  private async flushUploads(): Promise<boolean> {
+    if (!this.uploads.length || !this.remoteChartId) return false;
+    let rejected = false;
+    const batch = this.uploads.slice();
+
+    let wanted: Set<string>;
+    try {
+      const { missing } = await this.call<{ missing: string[] }>(
+        "POST",
+        `/api/charts/${this.remoteChartId}/figures/missing`,
+        { files: batch.map((u) => u.file) },
+      );
+      wanted = new Set(missing);
+    } catch {
+      // An older service without the route: send everything rather than drop.
+      wanted = new Set(batch.map((u) => u.file));
+    }
+
+    for (const up of batch) {
+      const i = this.uploads.indexOf(up);
+      if (!wanted.has(up.file)) {
+        if (i >= 0) this.uploads.splice(i, 1);
+        continue;
+      }
+      let bytes: Buffer;
+      try {
+        bytes = fs.readFileSync(up.path);
+      } catch {
+        // The asset is gone from disk; there is nothing left to send.
+        if (i >= 0) this.uploads.splice(i, 1);
+        continue;
+      }
+      const ok = await this.send(
+        "PUT",
+        `/api/charts/${this.remoteChartId}/figures/${encodeURIComponent(up.file)}`,
+        bytes,
+        up.mime,
+      );
+      if (!ok) rejected = true;
+      const j = this.uploads.indexOf(up);
+      if (j >= 0) this.uploads.splice(j, 1);
+    }
+    return rejected;
+  }
+
+  /** Raw-body request, for blobs that must not be JSON-encoded. */
+  private async send(method: string, route: string, body: Buffer, mime: string): Promise<boolean> {
+    const res = await this.fetchImpl(new URL(route, this.opts.url).toString(), {
+      method,
+      headers: { "Content-Type": mime, Authorization: `Bearer ${this.opts.token}` },
+      body: new Uint8Array(body),
+    });
+    // Over quota, or a file the service will never accept. Retrying cannot
+    // change the answer, so the blob is dropped and the reason reported once.
+    if (res.status === 507 || res.status === 400 || res.status === 413) {
+      const text = await res.text().catch(() => "");
+      this.lastError = `figure rejected: ${res.status}${text ? ` ${text.slice(0, 200)}` : ""}`;
+      this.opts.onError?.(new Error(this.lastError));
+      return false;
+    }
+    if (!res.ok) {
+      const text = await res.text().catch(() => "");
+      throw new Error(`${method} ${route} failed: ${res.status}${text ? ` ${text.slice(0, 200)}` : ""}`);
+    }
+    return true;
   }
 
   private async call<T>(method: string, route: string, body?: unknown): Promise<T> {
