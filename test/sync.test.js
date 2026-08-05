@@ -313,6 +313,74 @@ test("attaching a figure to a store queues both the op and its bytes", async () 
   await c.close();
 });
 
+test("the same figure queued twice is uploaded once", async () => {
+  const fs = await import("node:fs");
+  const os = await import("node:os");
+  const path = await import("node:path");
+
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "skym-fig-"));
+  fs.writeFileSync(path.join(dir, "dup.png"), Buffer.from([5]));
+
+  const f = stubFetch(({ url, body }) => {
+    if (url.endsWith("/attach")) return { body: { chartId: "remote-1" } };
+    if (url.endsWith("/figures/missing")) return { body: { missing: body.files } };
+    return { body: { accepted: [], revision: 0 } };
+  });
+  const c = await client(f);
+
+  // A backfill queues from the replayed log and from the graph's own state,
+  // so the same file arrives twice.
+  const up = { file: "dup.png", path: path.join(dir, "dup.png"), mime: "image/png" };
+  c.enqueueFigure(up);
+  c.enqueueFigure({ ...up });
+  assert.equal(c.pending, 1, "the duplicate never enters the queue");
+
+  await c.flush();
+  assert.equal(f.calls.filter((x) => x.method === "PUT").length, 1, "uploaded once");
+  await c.close();
+});
+
+test("figures already on the graph are offered for backfill", async () => {
+  const { GraphStore } = await import("../dist/store.js");
+  const fs = await import("node:fs");
+  const os = await import("node:os");
+  const path = await import("node:path");
+
+  const f = stubFetch(({ url, body }) => {
+    if (url.endsWith("/attach")) return { body: { chartId: "remote-1" } };
+    if (url.endsWith("/figures/missing")) return { body: { missing: body.files } };
+    return { body: { accepted: [], revision: 0 } };
+  });
+  const c = await client(f);
+
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "skym-backfill-"));
+  const store = new GraphStore(root, "old", "Old chart");
+  store.init("Old chart");
+  store.upsertNode({ id: "a", title: "A", kind: "action" });
+  store.attachFigure("a", Buffer.from([1, 2, 3, 4]), "image/png", "from before uploads existed");
+  store.release();
+
+  // A fresh client that never saw those commits — the reconnect case.
+  const fresh = await client(f);
+  for (const node of store.get().nodes) {
+    for (const figure of node.figures) {
+      fresh.enqueueFigure({
+        file: figure.file,
+        path: path.join(store.assetsDir, figure.file),
+        mime: figure.mime ?? "image/png",
+      });
+    }
+  }
+  assert.ok(fresh.pending > 0, "the graph's existing figures are queued");
+
+  await fresh.flush();
+  const put = f.calls.find((x) => x.method === "PUT");
+  assert.ok(put, "a figure with no op in this session still uploads");
+  assert.deepEqual([...put.bytes], [1, 2, 3, 4]);
+  await fresh.close();
+  await c.close();
+});
+
 test("a figure refused for quota is dropped, and the reason survives", async () => {
   const fs = await import("node:fs");
   const os = await import("node:os");

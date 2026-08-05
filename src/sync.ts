@@ -117,8 +117,14 @@ export class SyncClient {
     this.start();
   }
 
-  /** Queues a figure's bytes to follow its op. Same fire-and-forget contract. */
+  /**
+   * Queues a figure's bytes to follow its op. Same fire-and-forget contract.
+   *
+   * Deduped by filename: the same figure arrives from both the replayed log
+   * and the graph's current state, and uploading it twice is pure waste.
+   */
   enqueueFigure(upload: PendingUpload): void {
+    if (this.uploads.some((u) => u.file === upload.file)) return;
     this.uploads.push(upload);
     this.start();
   }

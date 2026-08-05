@@ -146,6 +146,20 @@ async function ensureSync(): Promise<string | null> {
     queueFigure(client, entry);
   }
 
+  // Figures already on the graph, whose bytes may never have been sent: charts
+  // written before uploads existed, or a sync that dropped out mid-flush. The
+  // service is asked what it is missing before anything is read off disk, so
+  // this costs one request when there is nothing to do.
+  for (const node of store.get().nodes) {
+    for (const figure of node.figures) {
+      client.enqueueFigure({
+        file: figure.file,
+        path: path.join(store.assetsDir, figure.file),
+        mime: figure.mime ?? "image/png",
+      });
+    }
+  }
+
   // Ops are queued as they commit; the client drains on its own timer.
   store.subscribe((_g, entry) => {
     if (!entry) return;
