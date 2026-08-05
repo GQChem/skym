@@ -84,6 +84,8 @@ export class SyncClient {
   private flushing = false;
   private failures = 0;
   private remoteChartId: string | null = null;
+  private lastAttach: AttachInput | null = null;
+  private attachedSlug: string | null = null;
   private readonly fetchImpl: typeof fetch;
 
   /** Last error, so `flow_show` can report a degraded sync without spamming. */
@@ -102,7 +104,33 @@ export class SyncClient {
       title: input.title,
     });
     this.remoteChartId = body.chartId;
+    // Kept so a later reattach lands in the same project rather than creating
+    // a second one alongside it.
+    this.lastAttach = input;
+    this.attachedSlug = input.slug;
     return body.chartId;
+  }
+
+  /**
+   * Re-points at a different slug once the chart knows its real name.
+   *
+   * flow_init renames the chart after the title, but a tool called before it
+   * has already attached under the throwaway per-process id. Without this the
+   * service keeps that first row and every chat forks another chart with the
+   * same title. Queued ops are kept: they belong to this chart either way.
+   */
+  async reattach(slug: string, title: string): Promise<void> {
+    if (this.attachedSlug === slug) return;
+    // Deliberately not flushed first: anything still queued belongs to this
+    // chart, and sending it now would strand it on the row we are leaving.
+    const body = await this.call<{ chartId: string }>("POST", "/api/charts/attach", {
+      repo_key: this.lastAttach?.repoKey,
+      project_name: this.lastAttach?.projectName,
+      slug,
+      title,
+    });
+    this.remoteChartId = body.chartId;
+    this.attachedSlug = slug;
   }
 
   start(): void {

@@ -313,6 +313,38 @@ test("attaching a figure to a store queues both the op and its bytes", async () 
   await c.close();
 });
 
+test("reattach re-points the chart instead of forking a new one", async () => {
+  const f = stubFetch(({ url, n }) =>
+    url.endsWith("/attach") ? { body: { chartId: `remote-${n}` } } : { body: { accepted: [], revision: 0 } },
+  );
+  // A tool ran before flow_init, so this attached under the throwaway id.
+  const c = await client(f, {});
+  c.enqueue(entry("a", 1));
+
+  await c.reattach("swap-the-viewer", "Swap the viewer");
+  const attaches = f.calls.filter((x) => x.url.endsWith("/attach"));
+  assert.equal(attaches.length, 2, "the second attach carries the real slug");
+  assert.equal(attaches[1].body.slug, "swap-the-viewer");
+  assert.equal(attaches[1].body.repo_key, attaches[0].body.repo_key, "same project, not a new one");
+
+  // Ops queued before the rename still belong to this chart.
+  await c.flush();
+  const ops = f.calls.filter((x) => x.url.includes("/ops"));
+  assert.ok(ops.length >= 1, "queued ops survive the re-point");
+  assert.ok(ops.at(-1).url.includes("remote-2"), "and land on the re-pointed chart");
+  await c.close();
+});
+
+test("reattach to the slug already attached is a no-op", async () => {
+  const f = stubFetch(({ url }) =>
+    url.endsWith("/attach") ? { body: { chartId: "remote-1" } } : { body: { accepted: [], revision: 0 } },
+  );
+  const c = await client(f);
+  await c.reattach("chart", "Chart");
+  assert.equal(f.calls.filter((x) => x.url.endsWith("/attach")).length, 1, "no redundant attach");
+  await c.close();
+});
+
 test("the same figure queued twice is uploaded once", async () => {
   const fs = await import("node:fs");
   const os = await import("node:os");

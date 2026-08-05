@@ -287,6 +287,12 @@ server.registerTool(
   async ({ title, description, direction, fresh, folder }) => {
     const root = folder ? resolveFolder(folder) : undefined;
     const { resumed } = store.init(title, description, (direction as Direction) ?? "TD", fresh ?? false, root);
+    // init renames the chart to a slug derived from the title. A tool called
+    // before this one would already have attached under the random per-process
+    // id, forking a fresh chart on the service for every chat — the same title
+    // over and over on the dashboard. Re-attach so the row follows the slug
+    // that actually identifies this chart.
+    if (sync) await sync.reattach(store.chartId, store.get().title).catch(() => {});
     // ensureViewer connects the sync and flushes; its note is what the user
     // needs to see when pairing is still outstanding.
     const syncNote = await ensureSync();

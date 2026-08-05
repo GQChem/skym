@@ -129,6 +129,34 @@ async function route({ pool, req, res, url }: Ctx): Promise<void> {
     return json(res, 200, { providers: configuredProviders() });
   }
 
+  // --- operator endpoint ---
+  //
+  // Billing does not exist yet, so moving a user between plans is manual and
+  // needs database access the operator may not have a route to. Gated on a
+  // secret only the deploy holds: with ADMIN_TOKEN unset the route is not
+  // merely forbidden, it does not exist.
+  if (pathname === "/api/admin/plan" && method === "POST") {
+    const secret = process.env.ADMIN_TOKEN;
+    if (!secret) return json(res, 404, { error: "not found" });
+    if (bearer(req) !== secret) return json(res, 401, { error: "unauthorized" });
+
+    const body = await readJson<{ email?: string; plan?: string }>(req);
+    if (!body.email || !body.plan) return json(res, 400, { error: "email and plan required" });
+    // An unknown plan silently reads as free at check time, which would look
+    // like the change had simply failed.
+    if (!["free", "pro"].includes(body.plan)) return json(res, 400, { error: `unknown plan ${body.plan}` });
+
+    const r = await pool.query<{ email: string; plan: string; storage_limit_bytes: string | null }>(
+      "UPDATE users SET plan = $1 WHERE lower(email) = lower($2) RETURNING email, plan, storage_limit_bytes",
+      [body.plan, body.email],
+    );
+    if (!r.rows.length) {
+      const all = await pool.query<{ email: string; plan: string }>("SELECT email, plan FROM users ORDER BY created_at");
+      return json(res, 404, { error: `no user with email ${body.email}`, known: all.rows });
+    }
+    return json(res, 200, { ok: true, user: r.rows[0] });
+  }
+
   const authStart = pathname.match(/^\/auth\/(google|github)$/);
   if (authStart && method === "GET") {
     const name = authStart[1] as ProviderName;
