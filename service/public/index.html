@@ -16,7 +16,7 @@
 
     <main>
       <section class="hero wrap">
-        <span class="eyebrow">MCP server for coding agents</span>
+        <span class="eyebrow">MCP server for coding agents · build from source</span>
         <h1>See what your agent is actually doing.</h1>
         <p class="lede">
           skym keeps a live flowchart of your agent's work — every question it asked, every experiment it ran, and every
@@ -61,9 +61,11 @@
         <div class="steps">
           <div class="step">
             <div>
-              <h3>Add the MCP server</h3>
-              <p>Point your agent at skym-flow. Claude Code picks up the chart tools automatically.</p>
-              <pre class="code">claude mcp add skym-flow -- npx -y skym-flow</pre>
+              <h3>Build it and add the MCP server</h3>
+              <p>Clone the repo, build once, then point Claude Code at the build. Copy <code>CLAUDE.md.example</code> into your project's <code>CLAUDE.md</code> — the tools stay idle unless Claude is told to call them.</p>
+              <pre class="code">git clone https://github.com/GQChem/skym &amp;&amp; cd skym
+npm install &amp;&amp; npm run build
+claude mcp add skym-flow -- node "$PWD/dist/index.js"</pre>
             </div>
           </div>
           <div class="step">
