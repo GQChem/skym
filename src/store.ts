@@ -242,6 +242,18 @@ export class GraphStore {
   }
 
   /**
+   * The whole op log, for a client that connected after the fact and needs to
+   * ship what it missed. Empty when the chart has not been written yet.
+   */
+  readLog(): Entry[] {
+    try {
+      return decodeLog(fs.readFileSync(this.logPath, "utf8"));
+    } catch {
+      return [];
+    }
+  }
+
+  /**
    * Appends the op, then writes the snapshot. The log is the source of truth —
    * a snapshot lost or corrupted is rebuilt by replaying it.
    */

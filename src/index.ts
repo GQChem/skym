@@ -134,6 +134,14 @@ async function ensureSync(): Promise<string | null> {
   }
 
   sync = client;
+
+  // Everything committed before the subscription existed — the ops from
+  // flow_init itself, and anything added while pairing was still pending.
+  // Without this the service only ever sees a chart from the moment it
+  // connected, which for a first run is nothing at all. Re-sending is safe:
+  // ops carry ids and the server dedupes.
+  for (const entry of store.readLog()) client.enqueue(entry);
+
   // Ops are queued as they commit; the client drains on its own timer.
   store.subscribe((_g, entry) => {
     if (entry) client.enqueue(entry);
@@ -174,6 +182,10 @@ async function ensureViewer(): Promise<string> {
   openBrowser(url);
   // Approval happens in a browser mid-session, so retry until it lands.
   if (!sync) await ensureSync().catch(() => null);
+  // Flush here rather than on shutdown: an MCP server exits when its stdio
+  // closes, which fires neither SIGINT nor SIGTERM, and `exit` cannot await.
+  // A tool call is already async, so the round trip costs nothing structural.
+  if (sync?.pending) await sync.flush().catch(() => null);
   return url;
 }
 
@@ -241,8 +253,10 @@ server.registerTool(
   async ({ title, description, direction, fresh, folder }) => {
     const root = folder ? resolveFolder(folder) : undefined;
     const { resumed } = store.init(title, description, (direction as Direction) ?? "TD", fresh ?? false, root);
-    const v = await ensureViewer();
+    // ensureViewer connects the sync and flushes; its note is what the user
+    // needs to see when pairing is still outstanding.
     const syncNote = await ensureSync();
+    const v = await ensureViewer();
     const g = store.get();
     return ok(
       summary(
