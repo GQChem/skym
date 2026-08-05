@@ -157,6 +157,24 @@ async function route({ pool, req, res, url }: Ctx): Promise<void> {
     return json(res, 200, { ok: true, user: r.rows[0] });
   }
 
+  // Read-only counterpart, for diagnosing what is actually in the database
+  // when the UI and the code disagree about it.
+  if (pathname === "/api/admin/charts" && method === "GET") {
+    const secret = process.env.ADMIN_TOKEN;
+    if (!secret) return json(res, 404, { error: "not found" });
+    if (bearer(req) !== secret) return json(res, 401, { error: "unauthorized" });
+
+    const r = await pool.query(
+      `SELECT c.id, c.slug, c.title, c.revision, p.name AS project, u.email AS owner,
+              (SELECT count(*) FROM ops o WHERE o.chart_id = c.id)::int AS ops
+         FROM charts c
+         JOIN projects p ON p.id = c.project_id
+         JOIN users u ON u.id = p.owner_id
+        ORDER BY c.title, c.updated_at DESC`,
+    );
+    return json(res, 200, { count: r.rows.length, charts: r.rows });
+  }
+
   const authStart = pathname.match(/^\/auth\/(google|github)$/);
   if (authStart && method === "GET") {
     const name = authStart[1] as ProviderName;
