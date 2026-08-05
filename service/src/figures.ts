@@ -52,8 +52,8 @@ const MB = 1024 * 1024;
  * without a code change.
  */
 export const planLimits = (): Record<string, number> => ({
-  free: Number(process.env.STORAGE_QUOTA_FREE ?? 100 * MB),
-  pro: Number(process.env.STORAGE_QUOTA_PRO ?? 5 * 1024 * MB),
+  free: Number(process.env.STORAGE_QUOTA_FREE ?? 50 * MB),
+  pro: Number(process.env.STORAGE_QUOTA_PRO ?? 1024 * MB),
 });
 
 export const DEFAULT_PLAN = "free";
