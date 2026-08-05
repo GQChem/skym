@@ -26,7 +26,7 @@ import {
   type ProviderName,
 } from "./oauth.js";
 import { buildGraph, ingest } from "./ingest.js";
-import { QuotaExceeded, findFigure, haveFigures, putFigure, usageFor } from "./figures.js";
+import { QuotaExceeded, findFigure, haveFigures, putFigure, removeBlob, usageFor } from "./figures.js";
 import { tx } from "./db.js";
 import type { Entry } from "../../src/ops.js";
 
@@ -307,8 +307,7 @@ async function route({ pool, req, res, url }: Ctx): Promise<void> {
               (SELECT count(*) FROM ops o WHERE o.chart_id = c.id) AS ops
          FROM charts c
          JOIN projects p ON p.id = c.project_id
-         LEFT JOIN project_members m ON m.project_id = p.id AND m.user_id = $1
-        WHERE p.owner_id = $1 OR m.user_id IS NOT NULL
+        WHERE ${VISIBLE_TO}
         ORDER BY c.updated_at DESC LIMIT 200`,
       [who.userId],
     );
@@ -383,11 +382,11 @@ async function route({ pool, req, res, url }: Ctx): Promise<void> {
 
   if (pathname === "/api/charts" && method === "GET") {
     const r = await pool.query(
-      `SELECT c.id, c.slug, c.title, c.revision, c.updated_at, p.name AS project
+      `SELECT c.id, c.slug, c.title, c.revision, c.updated_at, p.name AS project,
+              (SELECT count(*) FROM ops o WHERE o.chart_id = c.id)::int AS ops
          FROM charts c
          JOIN projects p ON p.id = c.project_id
-         LEFT JOIN project_members m ON m.project_id = p.id AND m.user_id = $1
-        WHERE p.owner_id = $1 OR m.user_id IS NOT NULL
+        WHERE ${VISIBLE_TO}
         ORDER BY c.updated_at DESC
         LIMIT 200`,
       [who.userId],
@@ -395,8 +394,47 @@ async function route({ pool, req, res, url }: Ctx): Promise<void> {
     return json(res, 200, { charts: r.rows });
   }
 
+  const chartDelete = pathname.match(/^\/api\/charts\/([0-9a-f-]{36})$/i);
+  if (chartDelete && method === "DELETE") {
+    const chartId = chartDelete[1]!;
+    if (!(await canAccessChart(pool, who.userId, chartId))) return json(res, 403, { error: "forbidden" });
+    await deleteChart(pool, chartId);
+    return json(res, 200, { ok: true });
+  }
+
   json(res, 404, { error: "not found" });
 }
+
+/**
+ * Drops a chart and reclaims its storage.
+ *
+ * Ops and figure rows go with the chart by cascade, but the blobs are on a
+ * volume the database knows nothing about — without unlinking them here the
+ * bytes would keep counting against the owner's quota forever. Files first:
+ * a leftover row whose blob is gone is recoverable, a file with no row is not
+ * attributable to anything and can never be cleaned up.
+ */
+async function deleteChart(pool: Pool, chartId: string): Promise<void> {
+  const blobs = await pool.query<{ storage_key: string }>(
+    "SELECT storage_key FROM figures WHERE chart_id = $1",
+    [chartId],
+  );
+  for (const row of blobs.rows) removeBlob(row.storage_key);
+  await pool.query("DELETE FROM charts WHERE id = $1", [chartId]);
+}
+
+/**
+ * Charts $1 may see: theirs, or a project they were invited to.
+ *
+ * EXISTS rather than a LEFT JOIN on project_members. attachChart writes an
+ * owner membership row for a project the user already owns, so a join matched
+ * both arms of the OR and returned every chart once per membership — which is
+ * why the dashboard listed each chart twice. A subquery cannot multiply rows.
+ */
+const VISIBLE_TO = `(
+  p.owner_id = $1
+  OR EXISTS (SELECT 1 FROM project_members m WHERE m.project_id = p.id AND m.user_id = $1)
+)`;
 
 /** Chart data the viewer fetches — public paths, private contents. */
 const DATA_ROUTES = new Set(["/graph", "/charts", "/config", "/whoami", "/events"]);
@@ -490,8 +528,7 @@ async function firstChartFor(pool: Pool, userId: string): Promise<string | null>
   const r = await pool.query<{ id: string }>(
     `SELECT c.id FROM charts c
        JOIN projects p ON p.id = c.project_id
-       LEFT JOIN project_members m ON m.project_id = p.id AND m.user_id = $1
-      WHERE p.owner_id = $1 OR m.user_id IS NOT NULL
+      WHERE ${VISIBLE_TO}
       ORDER BY c.updated_at DESC LIMIT 1`,
     [userId],
   );

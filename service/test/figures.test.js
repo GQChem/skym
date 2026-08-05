@@ -111,6 +111,58 @@ test("an unsupported type is refused", { skip }, async () => {
   );
 });
 
+// --- listing must not multiply rows ---
+
+test("an owner who is also a member sees each chart once", { skip }, async () => {
+  const chartId = await freshChart();
+  const projectId = (
+    await pool.query("SELECT project_id FROM charts WHERE id = $1", [chartId])
+  ).rows[0].project_id;
+
+  // Exactly what attachChart writes: an owner membership for a project the
+  // user already owns. A LEFT JOIN here returned the chart twice.
+  await pool.query(
+    "INSERT INTO project_members (project_id, user_id, role) VALUES ($1, $2, 'owner') ON CONFLICT DO NOTHING",
+    [projectId, userId],
+  );
+
+  const r = await pool.query(
+    `SELECT c.id FROM charts c
+       JOIN projects p ON p.id = c.project_id
+      WHERE (p.owner_id = $1
+             OR EXISTS (SELECT 1 FROM project_members m
+                         WHERE m.project_id = p.id AND m.user_id = $1))
+        AND c.id = $2`,
+    [userId, chartId],
+  );
+  assert.equal(r.rows.length, 1, "owner + member must not duplicate the chart");
+});
+
+test("deleting a chart takes its ops and figures with it", { skip }, async () => {
+  const chartId = await freshChart();
+  await figures.putFigure(pool, chartId, "gone.png", "image/png", Buffer.alloc(64));
+  const blob = await figures.findFigure(pool, chartId, "gone.png");
+  assert.ok(fs.existsSync(blob.path), "the blob is on disk to begin with");
+
+  const before = (await figures.usageFor(pool, userId)).used;
+  for (const row of (await pool.query("SELECT storage_key FROM figures WHERE chart_id = $1", [chartId])).rows) {
+    figures.removeBlob(row.storage_key);
+  }
+  await pool.query("DELETE FROM charts WHERE id = $1", [chartId]);
+
+  assert.ok(!fs.existsSync(blob.path), "the blob is unlinked from the volume");
+  assert.equal(
+    (await pool.query("SELECT 1 FROM figures WHERE chart_id = $1", [chartId])).rows.length,
+    0,
+    "figure rows cascade with the chart",
+  );
+  assert.equal(
+    (await figures.usageFor(pool, userId)).used,
+    before - 64,
+    "the freed bytes come back to the owner's quota",
+  );
+});
+
 // --- storage quota: refuse the upload, never evict what is already there ---
 
 test("usage counts every chart the user owns", { skip }, async () => {

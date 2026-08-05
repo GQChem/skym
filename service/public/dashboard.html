@@ -50,27 +50,86 @@
           `<a class="btn" href="/settings">Connect an agent</a>` +
           `</div>`;
 
-        const body = charts.length
-          ? `<div class="grid">` +
-            charts
-              .map(
-                (c) =>
-                  `<a class="chart-card" href="/chart?chart=${encodeURIComponent(c.id)}">` +
-                  `<h3>${escapeHtml(c.title || c.slug)}</h3>` +
-                  `<span class="project">${escapeHtml(c.project ?? "")}</span>` +
-                  `<div class="chart-meta">` +
-                  `<span class="pill">rev ${escapeHtml(c.revision)}</span>` +
-                  `<span class="when">${escapeHtml(ago(c.updated_at))}</span>` +
-                  `</div></a>`,
-              )
-              .join("") +
+        // A chart with no ops has nothing to draw; say so rather than let the
+        // card promise a picture the viewer cannot render.
+        const card = (c) => {
+          const title = c.title || c.slug;
+          const empty = Number(c.ops ?? 0) === 0;
+          return (
+            `<div class="chart-card${empty ? " is-empty" : ""}">` +
+            `<a class="chart-open" href="/chart?chart=${encodeURIComponent(c.id)}">` +
+            `<h3>${escapeHtml(title)}</h3>` +
+            `<span class="project">${escapeHtml(c.project ?? "")}</span>` +
+            `<div class="chart-meta">` +
+            `<span class="pill">${empty ? "empty" : `rev ${escapeHtml(c.revision)}`}</span>` +
+            `<span class="when">${escapeHtml(ago(c.updated_at))}</span>` +
+            `</div></a>` +
+            `<button class="card-del" type="button" title="Delete chart"` +
+            ` data-id="${escapeHtml(c.id)}" data-title="${escapeHtml(title)}"` +
+            ` aria-label="Delete ${escapeHtml(title)}">×</button>` +
             `</div>`
+          );
+        };
+
+        const body = charts.length
+          ? `<div class="grid">${charts.map(card).join("")}</div>`
           : `<div class="empty">` +
             `<h3>No charts yet</h3>` +
             `<p>Connect an agent in Settings, then ask it to start a chart with <code>flow_init</code>. It will appear here as it works.</p>` +
             `</div>`;
 
         main.innerHTML = head + body;
+        wireDelete();
+      }
+
+      function wireDelete() {
+        for (const btn of document.querySelectorAll(".card-del")) {
+          btn.addEventListener("click", (ev) => {
+            ev.preventDefault();
+            confirmDelete(btn.dataset.id, btn.dataset.title);
+          });
+        }
+      }
+
+      /** Mid-page confirm. Deleting a chart drops its ops and figures for good. */
+      function confirmDelete(id, title) {
+        const host = document.createElement("div");
+        host.className = "modal-back";
+        host.innerHTML =
+          `<div class="modal" role="dialog" aria-modal="true" aria-labelledby="del-q">` +
+          `<h2 id="del-q">Delete chart?</h2>` +
+          `<p>“<strong>${escapeHtml(title)}</strong>” and everything on it — every node, and every figure — will be removed. This cannot be undone.</p>` +
+          `<div class="modal-actions">` +
+          `<button class="btn" data-act="no">No, keep it</button>` +
+          `<button class="btn danger" data-act="yes">Yes, delete</button>` +
+          `</div><p class="msg" id="del-msg"></p></div>`;
+        document.body.appendChild(host);
+
+        const close = () => host.remove();
+        host.addEventListener("click", (e) => {
+          if (e.target === host) close();
+        });
+        document.addEventListener("keydown", function esc(e) {
+          if (e.key === "Escape") {
+            close();
+            document.removeEventListener("keydown", esc);
+          }
+        });
+        host.querySelector('[data-act="no"]').addEventListener("click", close);
+        host.querySelector('[data-act="yes"]').addEventListener("click", async (e) => {
+          const btn = e.currentTarget;
+          btn.disabled = true;
+          const r = await fetch(`/api/charts/${encodeURIComponent(id)}`, { method: "DELETE" }).catch(() => null);
+          if (r?.ok) {
+            location.reload();
+          } else {
+            btn.disabled = false;
+            const msg = host.querySelector("#del-msg");
+            msg.className = "msg bad";
+            msg.textContent = "Could not delete that chart. Try again.";
+          }
+        });
+        host.querySelector('[data-act="no"]').focus();
       }
     </script>
   </body>

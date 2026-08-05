@@ -190,6 +190,22 @@ export async function findFigure(pool: Pool, chartId: string, file: string): Pro
   return { mime: row.mime, path: full };
 }
 
+/**
+ * Unlinks a blob by its storage key. Best-effort: a file already gone is the
+ * desired end state, and a failure here must not abort deleting the chart.
+ */
+export function removeBlob(key: string): void {
+  const root = path.resolve(blobDir());
+  const full = path.resolve(root, key);
+  // Same guard as reads: a crafted key must not reach outside the volume.
+  if (!full.startsWith(root + path.sep)) return;
+  try {
+    fs.rmSync(full, { force: true });
+  } catch {
+    /* nothing left to remove */
+  }
+}
+
 /** Which of these filenames the service already holds bytes for. */
 export async function haveFigures(pool: Pool, chartId: string, files: string[]): Promise<Set<string>> {
   if (!files.length) return new Set();
