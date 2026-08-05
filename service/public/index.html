@@ -3,117 +3,91 @@
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>skym</title>
+    <title>skym — see what your agent is building</title>
+    <meta
+      name="description"
+      content="skym keeps a live flowchart of your coding agent's work: what it tried, what it found, and what it produced."
+    />
     <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'><text y='13' font-size='13'>🗺️</text></svg>" />
-    <style>
-      :root {
-        color-scheme: light dark;
-        --bg: #f4f6fa; --card: #fff; --ink: #141a24; --muted: #6b7789;
-        --line: #dde3ec; --accent: #2a78d6;
-      }
-      @media (prefers-color-scheme: dark) {
-        :root { --bg: #161b26; --card: #1c2230; --ink: #f2f5fa; --muted: #8b97ab; --line: #2c3444; --accent: #5aa3e8; }
-      }
-      * { box-sizing: border-box; }
-      body {
-        margin: 0; min-height: 100vh; display: grid; place-items: center;
-        background: var(--bg); color: var(--ink);
-        font: 15px/1.55 ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
-      }
-      main { width: min(92vw, 30rem); }
-      .card { background: var(--card); border: 1px solid var(--line); border-radius: 14px; padding: 28px; }
-      h1 { margin: 0 0 4px; font-size: 1.35rem; }
-      p.sub { margin: 0 0 22px; color: var(--muted); }
-      a.btn, button.btn {
-        display: flex; align-items: center; justify-content: center; gap: 9px;
-        width: 100%; padding: 11px 14px; margin-bottom: 10px;
-        border: 1px solid var(--line); border-radius: 9px; background: transparent;
-        color: inherit; font: inherit; text-decoration: none; cursor: pointer;
-      }
-      a.btn:hover, button.btn:hover { border-color: var(--accent); }
-      .code {
-        font: 600 1.5rem ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
-        letter-spacing: .12em; text-align: center; padding: 14px;
-        border: 1px dashed var(--line); border-radius: 9px; margin: 6px 0 18px;
-      }
-      input {
-        width: 100%; padding: 11px 12px; margin-bottom: 10px;
-        border: 1px solid var(--line); border-radius: 9px;
-        background: transparent; color: inherit; font: inherit;
-        text-transform: uppercase; letter-spacing: .1em;
-      }
-      .msg { margin-top: 12px; color: var(--muted); font-size: .92rem; }
-      .msg.bad { color: #d03b3b; }
-      .msg.good { color: #0d8a63; }
-      ul { margin: 0; padding-left: 18px; color: var(--muted); }
-      li { margin: 3px 0; }
-      hr { border: 0; border-top: 1px solid var(--line); margin: 22px 0; }
-    </style>
+    <link rel="stylesheet" href="/site.css" />
   </head>
   <body>
+    <header class="nav" id="nav"></header>
+
     <main>
-      <div class="card">
-        <h1>skym</h1>
-        <p class="sub" id="sub">Sign in to see your charts.</p>
-        <div id="signin"></div>
-        <div id="account" hidden>
-          <hr />
-          <h1 style="font-size:1rem">Connect an agent</h1>
-          <p class="sub">Run <code>skym-flow</code> locally, then enter the code it prints.</p>
-          <input id="code" placeholder="XXXX-XXXX" autocomplete="off" spellcheck="false" />
-          <button class="btn" id="approve">Approve</button>
-          <p class="msg" id="msg"></p>
+      <section class="hero wrap">
+        <span class="eyebrow">MCP server for coding agents</span>
+        <h1>See what your agent is actually doing.</h1>
+        <p class="lede">
+          skym keeps a live flowchart of your agent's work — every question it asked, every experiment it ran, and every
+          result it found — so a long session stays legible instead of scrolling away.
+        </p>
+        <div class="hero-actions">
+          <a class="btn primary lg" href="/dashboard">Get started</a>
+          <a class="btn lg" href="#how">How it works</a>
         </div>
-      </div>
+      </section>
+
+      <section class="section wrap">
+        <h2>Built for long sessions</h2>
+        <p class="sub">The chart is the memory your transcript isn't.</p>
+        <div class="grid">
+          <div class="feature">
+            <span class="ico" aria-hidden="true">🌳</span>
+            <h3>A tree, not a transcript</h3>
+            <p>Goals, questions, experiments and results connect as nodes, so the shape of the work is visible.</p>
+          </div>
+          <div class="feature">
+            <span class="ico" aria-hidden="true">⚡</span>
+            <h3>Updates live</h3>
+            <p>The viewer follows along as your agent works. No refresh, no export step.</p>
+          </div>
+          <div class="feature">
+            <span class="ico" aria-hidden="true">📊</span>
+            <h3>Evidence attached</h3>
+            <p>Plots and screenshots hang off the result that produced them, so findings keep their proof.</p>
+          </div>
+          <div class="feature">
+            <span class="ico" aria-hidden="true">☁️</span>
+            <h3>Yours everywhere</h3>
+            <p>Pair once and your charts sync here, readable from any browser you sign in to.</p>
+          </div>
+        </div>
+      </section>
+
+      <section class="section wrap" id="how">
+        <h2>How it works</h2>
+        <p class="sub">Three steps, once.</p>
+        <div class="steps">
+          <div class="step">
+            <div>
+              <h3>Add the MCP server</h3>
+              <p>Point your agent at skym-flow. Claude Code picks up the chart tools automatically.</p>
+              <pre class="code">claude mcp add skym-flow -- npx -y skym-flow</pre>
+            </div>
+          </div>
+          <div class="step">
+            <div>
+              <h3>Pair this account</h3>
+              <p>The first chart tool prints a code. Enter it in Settings and the agent syncs here from then on.</p>
+            </div>
+          </div>
+          <div class="step">
+            <div>
+              <h3>Watch it build</h3>
+              <p>Ask your agent to work as usual. The chart fills in as it goes — open it from My Charts.</p>
+            </div>
+          </div>
+        </div>
+      </section>
     </main>
 
+    <footer class="foot" id="foot"></footer>
+
     <script type="module">
-      const $ = (id) => document.getElementById(id);
-      const label = { google: "Continue with Google", github: "Continue with GitHub" };
-
-      const me = await fetch("/api/me").then((r) => (r.ok ? r.json() : null)).catch(() => null);
-
-      if (me?.user) {
-        $("sub").textContent = `Signed in as ${me.user.email}`;
-        $("account").hidden = false;
-        const charts = await fetch("/api/charts").then((r) => r.json()).catch(() => ({ charts: [] }));
-        if (charts.charts?.length) {
-          const list = document.createElement("ul");
-          for (const c of charts.charts.slice(0, 20)) {
-            const li = document.createElement("li");
-            li.textContent = `${c.title} — rev ${c.revision}`;
-            list.appendChild(li);
-          }
-          $("signin").appendChild(list);
-        } else {
-          $("signin").innerHTML = `<p class="msg">No charts yet. Pair an agent below, then run flow_init.</p>`;
-        }
-      } else {
-        const { providers = [] } = await fetch("/api/providers").then((r) => r.json()).catch(() => ({}));
-        if (!providers.length) {
-          $("signin").innerHTML = `<p class="msg bad">No sign-in provider is configured on this deploy.</p>`;
-        }
-        for (const p of providers) {
-          const a = document.createElement("a");
-          a.className = "btn";
-          a.href = `/auth/${p}`;
-          a.textContent = label[p] ?? p;
-          $("signin").appendChild(a);
-        }
-      }
-
-      $("approve")?.addEventListener("click", async () => {
-        const user_code = $("code").value.trim();
-        if (!user_code) return;
-        const r = await fetch("/api/pair/approve", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ user_code }),
-        });
-        const msg = $("msg");
-        msg.className = r.ok ? "msg good" : "msg bad";
-        msg.textContent = r.ok ? "Agent connected. Back to your terminal." : "Unknown or expired code.";
-      });
+      import { me, renderNav, renderFooter } from "/site.js";
+      renderFooter();
+      renderNav((await me())?.user ?? null, "/");
     </script>
   </body>
 </html>

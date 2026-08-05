@@ -1,0 +1,77 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>My Charts — skym</title>
+    <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'><text y='13' font-size='13'>🗺️</text></svg>" />
+    <link rel="stylesheet" href="/site.css" />
+  </head>
+  <body>
+    <header class="nav" id="nav"></header>
+
+    <main class="wrap" id="main">
+      <div class="grid" id="loading">
+        <div class="skeleton"></div>
+        <div class="skeleton"></div>
+        <div class="skeleton"></div>
+      </div>
+    </main>
+
+    <footer class="foot" id="foot"></footer>
+
+    <script type="module">
+      import { $, ago, escapeHtml, me, renderFooter, renderNav, renderSignin } from "/site.js";
+
+      renderFooter();
+      const session = await me();
+      const user = session?.user ?? null;
+      renderNav(user, "/dashboard");
+
+      const main = $("main");
+
+      if (!user) {
+        main.innerHTML =
+          `<div class="panel signin-card">` +
+          `<h2>Sign in to skym</h2>` +
+          `<p class="sub">Your charts follow your account.</p>` +
+          `<div id="signin"></div>` +
+          `</div>`;
+        await renderSignin($("signin"));
+      } else {
+        const { charts = [] } = await fetch("/api/charts")
+          .then((r) => r.json())
+          .catch(() => ({ charts: [] }));
+
+        const head =
+          `<div class="page-head">` +
+          `<div><h1>My Charts</h1><p>${charts.length} chart${charts.length === 1 ? "" : "s"} synced to this account.</p></div>` +
+          `<span class="spacer"></span>` +
+          `<a class="btn" href="/settings">Connect an agent</a>` +
+          `</div>`;
+
+        const body = charts.length
+          ? `<div class="grid">` +
+            charts
+              .map(
+                (c) =>
+                  `<a class="chart-card" href="/chart?chart=${encodeURIComponent(c.id)}">` +
+                  `<h3>${escapeHtml(c.title || c.slug)}</h3>` +
+                  `<span class="project">${escapeHtml(c.project ?? "")}</span>` +
+                  `<div class="chart-meta">` +
+                  `<span class="pill">rev ${escapeHtml(c.revision)}</span>` +
+                  `<span class="when">${escapeHtml(ago(c.updated_at))}</span>` +
+                  `</div></a>`,
+              )
+              .join("") +
+            `</div>`
+          : `<div class="empty">` +
+            `<h3>No charts yet</h3>` +
+            `<p>Connect an agent in Settings, then ask it to start a chart with <code>flow_init</code>. It will appear here as it works.</p>` +
+            `</div>`;
+
+        main.innerHTML = head + body;
+      }
+    </script>
+  </body>
+</html>

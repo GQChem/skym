@@ -4,7 +4,7 @@ Hosted charts, accounts, and the remote command queue for `skym-flow`. Deploys t
 
 ## Status
 
-Milestone 2, partial. What works today: schema and migrations, op ingest, device-code pairing, agent tokens, chart attach/list/read. **Not built yet:** the OAuth handlers themselves (`auth.ts` has the account-linking logic, but no `/auth/google` routes), figure blob upload, the hosted viewer, and the command queue endpoints.
+Milestone 2. What works today: schema and migrations, op ingest, device-code pairing, agent tokens, chart attach/list/read, OAuth sign-in, the hosted viewer, figure blob upload, and the marketing/dashboard/settings pages. **Not built yet:** the command queue endpoints.
 
 ## Design notes
 
@@ -18,6 +18,14 @@ Milestone 2, partial. What works today: schema and migrations, op ingest, device
 
 **Accounts link on verified email only.** An unverified provider email creates a separate account. Anything else means signing up at a provider with someone else's address inherits their charts.
 
+**Figure bytes travel outside the op log.** A `figure.add` op carries only a filename, so ops alone leave the hosted viewer with a reference and nothing to render. The agent uploads blobs on a separate route after its ops land, asking `/figures/missing` first so a resumed sync re-sends ops (cheap, idempotent) but not megabytes. Blobs are keyed by chart id, so one chart's upload can never overwrite another's whatever filename the agent sends.
+
+**Figures are private.** `/assets/<file>?chart=<id>` requires a principal who can see that chart — the same check the graph route makes. Serving them as static files would make every chart's evidence world-readable to anyone who guessed a name.
+
+**Storage is capped by refusal, not eviction.** A user's blobs are summed across the charts they own and checked before the write, so a refused upload leaves nothing on the volume. Nothing already stored is ever deleted to make room: a figure is the evidence behind a result, and evicting one would leave the node asserting a finding whose proof is a broken image. Replacing an existing file is charged only the difference, or correcting a figure would be impossible at the ceiling. The agent treats 507 as terminal and reports it rather than retrying.
+
+**Quota is per user, resolved at check time.** `users.plan` names the tier and the bytes each tier grants live in config (`STORAGE_QUOTA_FREE`, `STORAGE_QUOTA_PRO`), so repricing a plan is a redeploy rather than a migration. `users.storage_limit_bytes` overrides the plan for one account — comping an individual should not require inventing a tier. An unrecognised plan falls back to free, never to unlimited: a typo must not hand out free storage.
+
 ## Running locally
 
 ```bash
@@ -30,14 +38,14 @@ Migrations run on boot — Railway runs the container and nothing else, so a sep
 ## Tests
 
 ```bash
-npm test                                    # pure logic only
-DATABASE_URL=postgres://... npm test        # plus ingest integration
+npm test                                         # pure logic only
+TEST_DATABASE_URL=postgres://... npm test        # plus ingest and figure integration
 ```
 
-The ingest tests **skip loudly without `DATABASE_URL`** rather than passing vacuously. They cover the guarantees that only a real database exercises: seq assignment under collision, idempotent redelivery, server-side validation, and partial-batch acceptance. A green run without a database does not mean ingest is verified.
+The ingest and figure tests **skip loudly without `TEST_DATABASE_URL`** rather than passing vacuously. They cover the guarantees that only a real database exercises: seq assignment under collision, idempotent redelivery, server-side validation, partial-batch acceptance, and figure storage isolation between charts. A green run without a database does not mean either is verified.
 
 ## Railway
 
 Attach a Postgres service (injects `DATABASE_URL`) and mount a volume for figures. Set `PUBLIC_URL` to the stable domain — pairing URLs and OAuth callbacks are built from it, and guessing from the request host is wrong behind a proxy.
 
-The container filesystem is ephemeral: figures written outside the mounted volume disappear on the next deploy. `FIGURE_DIR` must point inside it.
+The container filesystem is ephemeral: blobs written outside the mounted volume disappear on the next deploy. `BLOB_DIR` must point inside it.

@@ -1,0 +1,107 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Settings — skym</title>
+    <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'><text y='13' font-size='13'>🗺️</text></svg>" />
+    <link rel="stylesheet" href="/site.css" />
+  </head>
+  <body>
+    <header class="nav" id="nav"></header>
+
+    <main class="wrap" id="main"></main>
+
+    <footer class="foot" id="foot"></footer>
+
+    <script type="module">
+      import { $, bytes, escapeHtml, me, renderFooter, renderNav, renderSignin } from "/site.js";
+
+      renderFooter();
+      const session = await me();
+      const user = session?.user ?? null;
+      renderNav(user, "/settings");
+
+      const main = $("main");
+
+      if (!user) {
+        main.innerHTML =
+          `<div class="panel signin-card">` +
+          `<h2>Sign in to skym</h2>` +
+          `<p class="sub">Settings live with your account.</p>` +
+          `<div id="signin"></div>` +
+          `</div>`;
+        await renderSignin($("signin"));
+      } else {
+        main.innerHTML =
+          `<div class="page-head"><div><h1>Settings</h1><p>Your account and connected agents.</p></div></div>` +
+          `<div class="panel">` +
+          `<h2>Connect an agent</h2>` +
+          `<p class="sub">Run your agent with the skym-flow MCP server. The first chart tool prints a code — enter it here to link that machine to this account.</p>` +
+          `<div class="field-row">` +
+          `<input id="code" type="text" placeholder="XXXX-XXXX" autocomplete="off" spellcheck="false" maxlength="9" />` +
+          `<button class="btn primary" id="approve">Approve</button>` +
+          `</div>` +
+          `<p class="msg" id="msg"></p>` +
+          `</div>` +
+          `<div class="panel">` +
+          `<h2>Storage</h2>` +
+          `<p class="sub">Figures your agents have uploaded.</p>` +
+          `<div id="usage" class="muted">Checking…</div>` +
+          `</div>` +
+          `<div class="panel">` +
+          `<h2>Account</h2>` +
+          `<dl class="kv">` +
+          `<dt>Email</dt><dd>${escapeHtml(user.email)}</dd>` +
+          (user.name ? `<dt>Name</dt><dd>${escapeHtml(user.name)}</dd>` : "") +
+          `</dl>` +
+          `</div>`;
+
+        renderUsage();
+
+        async function renderUsage() {
+          const u = await fetch("/api/usage")
+            .then((r) => (r.ok ? r.json() : null))
+            .catch(() => null);
+          const el = $("usage");
+          if (!u) {
+            el.textContent = "Usage is unavailable right now.";
+            return;
+          }
+          const pct = u.quota > 0 ? Math.min(100, (u.used / u.quota) * 100) : 0;
+          el.innerHTML =
+            `<div class="meter${pct >= 90 ? " full" : ""}"><span style="width:${pct.toFixed(1)}%"></span></div>` +
+            `<p class="msg">${escapeHtml(bytes(u.used))} of ${escapeHtml(bytes(u.quota))} used` +
+            `<span class="pill" style="margin-left:8px">${escapeHtml(u.plan ?? "free")}</span>` +
+            (pct >= 90 ? "<br />Uploads are refused once this is full — nothing already stored is deleted." : "") +
+            `</p>`;
+        }
+
+        const approve = async () => {
+          const user_code = $("code").value.trim();
+          const msg = $("msg");
+          if (!user_code) {
+            msg.className = "msg bad";
+            msg.textContent = "Enter the code your agent printed.";
+            return;
+          }
+          const r = await fetch("/api/pair/approve", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ user_code }),
+          }).catch(() => null);
+          msg.className = r?.ok ? "msg good" : "msg bad";
+          msg.textContent = r?.ok
+            ? "Agent connected. Back to your terminal — charts will sync here."
+            : "Unknown or expired code. Ask the agent for a fresh one.";
+          if (r?.ok) $("code").value = "";
+        };
+
+        $("approve").addEventListener("click", approve);
+        $("code").addEventListener("keydown", (e) => {
+          if (e.key === "Enter") approve();
+        });
+      }
+    </script>
+  </body>
+</html>
