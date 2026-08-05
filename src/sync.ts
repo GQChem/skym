@@ -169,6 +169,57 @@ export interface PairingPrompt {
   expiresIn: number;
 }
 
+const PENDING_FILE = path.join(os.homedir(), ".skym", "pending-pairing.json");
+
+/**
+ * A device code outlives the process that asked for it.
+ *
+ * Approval happens in a browser on the user's own schedule, and the agent
+ * process may well have exited by then — a chat ends, Claude Code restarts.
+ * Persisting the code means the next process redeems it instead of minting a
+ * fresh one the user has to approve all over again.
+ */
+export function readPendingPairing(): PairingPrompt | null {
+  try {
+    const raw = JSON.parse(fs.readFileSync(PENDING_FILE, "utf8")) as PairingPrompt & { at?: number };
+    // Server-side expiry is authoritative; this just avoids a pointless call.
+    if (raw.at && Date.now() - raw.at > raw.expiresIn * 1000) return null;
+    return raw.deviceCode ? raw : null;
+  } catch {
+    return null;
+  }
+}
+
+export function writePendingPairing(p: PairingPrompt): void {
+  fs.mkdirSync(path.dirname(PENDING_FILE), { recursive: true });
+  fs.writeFileSync(PENDING_FILE, JSON.stringify({ ...p, at: Date.now() }, null, 2), "utf8");
+}
+
+export function clearPendingPairing(): void {
+  try {
+    fs.rmSync(PENDING_FILE, { force: true });
+  } catch {
+    /* already gone */
+  }
+}
+
+/** One poll, not a loop: called on each tool call so approval lands eventually. */
+export async function tryRedeem(
+  url: string,
+  deviceCode: string,
+  fetchImpl: typeof fetch = fetch,
+): Promise<{ status: "pending" | "expired" | "ready"; token?: string }> {
+  const res = await fetchImpl(new URL("/api/pair/poll", url).toString(), {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ device_code: deviceCode }),
+  });
+  if (res.status === 410) return { status: "expired" };
+  if (!res.ok) return { status: "pending" };
+  const body = (await res.json()) as { status: string; token?: string };
+  return body.status === "ready" && body.token ? { status: "ready", token: body.token } : { status: "pending" };
+}
+
 export async function startPairing(url: string, fetchImpl: typeof fetch = fetch): Promise<PairingPrompt> {
   const res = await fetchImpl(new URL("/api/pair/start", url).toString(), { method: "POST" });
   if (!res.ok) throw new Error(`pairing failed to start: ${res.status}`);

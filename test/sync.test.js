@@ -194,3 +194,39 @@ test("ops committed to a store land in the sync queue", async () => {
   assert.equal(new Set(ids).size, ids.length, "no duplicates in the batch");
   await c.close();
 });
+
+// --- pairing must outlive the process that started it ---
+
+test("a pending code is remembered and redeemed later", async () => {
+  const { readPendingPairing, writePendingPairing, clearPendingPairing, tryRedeem } = await import(
+    "../dist/sync.js"
+  );
+  clearPendingPairing();
+  assert.equal(readPendingPairing(), null, "starts clean");
+
+  const prompt = { deviceCode: "dev-9", userCode: "AAAA-BBBB", verificationUri: "https://svc.test/pair", expiresIn: 900 };
+  writePendingPairing(prompt);
+
+  // A different process would read it back from disk exactly like this.
+  const back = readPendingPairing();
+  assert.equal(back.deviceCode, "dev-9");
+  assert.equal(back.userCode, "AAAA-BBBB");
+
+  // Still pending on the first look, ready once approved.
+  let approved = false;
+  const f = stubFetch(() => (approved ? { body: { status: "ready", token: "tok-1" } } : { status: 202, body: { status: "pending" } }));
+  assert.equal((await tryRedeem("https://svc.test", "dev-9", f)).status, "pending");
+  approved = true;
+  const out = await tryRedeem("https://svc.test", "dev-9", f);
+  assert.equal(out.status, "ready");
+  assert.equal(out.token, "tok-1");
+
+  clearPendingPairing();
+  assert.equal(readPendingPairing(), null, "cleared once redeemed");
+});
+
+test("an expired pending code is reported, not retried forever", async () => {
+  const { tryRedeem } = await import("../dist/sync.js");
+  const f = stubFetch(() => ({ status: 410, body: { status: "expired" } }));
+  assert.equal((await tryRedeem("https://svc.test", "dev-x", f)).status, "expired");
+});

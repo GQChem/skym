@@ -20,7 +20,10 @@ import { allStates, kindDef, openStates, type KindDef } from "./vocab.js";
 import { checkBullets, checkState } from "./validate.js";
 import {
   SyncClient,
-  awaitPairing,
+  clearPendingPairing,
+  readPendingPairing,
+  tryRedeem,
+  writePendingPairing,
   readCredentials,
   startPairing,
   writeCredentials,
@@ -46,7 +49,7 @@ const OPEN_STATES = openStates(vocab);
 
 let opened = false;
 let sync: SyncClient | null = null;
-let pairingPrompt: PairingPrompt | null = null;
+
 
 function openBrowser(url: string): void {
   if (!autoOpen || opened) return;
@@ -76,22 +79,35 @@ async function ensureSync(): Promise<string | null> {
   if (!config.service) return null;
   if (sync) return null;
 
-  const creds = readCredentials();
+  let creds = readCredentials();
+
   if (!creds || creds.url !== config.service) {
-    if (pairingPrompt) return pairingNotice(pairingPrompt);
+    // A code from an earlier process may already be approved — redeem that
+    // before asking the user to approve anything again.
+    const pending = readPendingPairing();
+    if (pending) {
+      try {
+        const out = await tryRedeem(config.service, pending.deviceCode);
+        if (out.status === "ready" && out.token) {
+          creds = { url: config.service, token: out.token };
+          writeCredentials(creds);
+          clearPendingPairing();
+        } else if (out.status === "expired") {
+          clearPendingPairing();
+        } else {
+          return pairingNotice(pending);
+        }
+      } catch {
+        return pairingNotice(pending);
+      }
+    }
+  }
+
+  if (!creds || creds.url !== config.service) {
     try {
       const prompt = await startPairing(config.service);
-      pairingPrompt = prompt;
+      writePendingPairing(prompt);
       openBrowser(prompt.verificationUri);
-      // Redeems in the background; the next tool call picks up the token.
-      void awaitPairing(config.service, prompt.deviceCode)
-        .then((token) => {
-          writeCredentials({ url: config.service!, token });
-          pairingPrompt = null;
-        })
-        .catch(() => {
-          pairingPrompt = null;
-        });
       return pairingNotice(prompt);
     } catch (err) {
       return `Could not reach the skym service at ${config.service}: ${(err as Error).message}`;
@@ -127,7 +143,7 @@ async function ensureSync(): Promise<string | null> {
 
 const pairingNotice = (p: PairingPrompt): string =>
   `Connect this agent to skym: open ${p.verificationUri} and enter code ${p.userCode}\n` +
-  `The chart works locally meanwhile; it will sync once approved.`;
+  `Approve it whenever — the code is remembered, so the next chart tool picks it up.`;
 
 /** Identifies the project so charts land under it without the user naming one. */
 function repoKey(): string | undefined {
