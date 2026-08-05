@@ -57,6 +57,10 @@ test.before(async () => {
 });
 
 test.after(async () => {
+  // Everything this suite made hangs off its user, and projects cascade from
+  // it. Without this a run leaves its scaffolding behind for good — which is
+  // how a production database ended up with hundreds of throwaway projects.
+  if (pool && userId) await pool.query("DELETE FROM users WHERE id = $1", [userId]).catch(() => {});
   if (pool) await pool.end();
 });
 

@@ -185,7 +185,7 @@ async function route({ pool, req, res, url }: Ctx): Promise<void> {
 
     const body = await readJson<{ confirm?: boolean }>(req);
     const doomed = await pool.query<{ id: string; name: string }>(
-      "SELECT id, name FROM projects WHERE name ~ '^(skym-)?proj-[A-Za-z0-9]{8}$'",
+      "SELECT id, name FROM projects WHERE name ~ '^(skym-)?proj-[A-Za-z0-9]{6,8}$'",
     );
     if (!body.confirm) {
       return json(res, 200, { dryRun: true, projects: doomed.rows.length, names: doomed.rows.map((p) => p.name) });

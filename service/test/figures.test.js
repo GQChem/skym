@@ -34,7 +34,14 @@ test.before(async () => {
 });
 
 test.after(async () => {
-  await pool?.end();
+  // Projects cascade from their owner, so dropping the users this suite made
+  // takes their charts, ops and figure rows with them. The blobs live on a
+  // volume the database knows nothing about, hence the separate rmSync.
+  if (pool) {
+    await pool.query("DELETE FROM users WHERE email LIKE 'fig-%@test.local' OR email LIKE 'other-%@test.local'").catch(() => {});
+    await pool.end();
+  }
+  if (blobDir) fs.rmSync(blobDir, { recursive: true, force: true });
 });
 
 async function freshChart() {
