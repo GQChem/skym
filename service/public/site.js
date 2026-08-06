@@ -74,7 +74,7 @@ export function renderNav(user, current) {
         ? `<img src="${escapeHtml(user.avatar_url)}" alt="" referrerpolicy="no-referrer" />`
         : escapeHtml(initials(user))) +
       `</a>` +
-      `<form method="POST" action="/auth/logout"><button class="btn" type="submit">Sign out</button></form>`
+      `<form method="POST" action="/auth/logout"><button class="btn" type="submit">Log out</button></form>`
     : `<a class="btn primary" href="/dashboard">Sign in</a>`;
 
   el.innerHTML =

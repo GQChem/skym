@@ -65,7 +65,10 @@
           `<dt>Email</dt><dd>${escapeHtml(user.email)}</dd>` +
           (user.name ? `<dt>Name</dt><dd>${escapeHtml(user.name)}</dd>` : "") +
           `</dl>` +
-          `<p><a class="btn" href="/api/account/export">Download my data</a></p>` +
+          `<div class="field-row">` +
+          `<a class="btn" href="/api/account/export">Download my data</a>` +
+          `<form method="POST" action="/auth/logout"><button class="btn" type="submit">Log out</button></form>` +
+          `</div>` +
           `</div>` +
           `<div class="panel">` +
           `<h2>Delete account</h2>` +
