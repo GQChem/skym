@@ -216,12 +216,29 @@ async function route({ pool, req, res, url }: Ctx): Promise<void> {
   if (pathname === "/api/billing/webhook" && method === "POST") {
     const signature = req.headers["stripe-signature"];
     if (!signature || Array.isArray(signature)) return json(res, 400, { error: "missing Stripe signature" });
+    let event;
     try {
-      const event = constructStripeEvent(await readBody(req, 1024 * 1024), signature);
+      event = constructStripeEvent(await readBody(req, 1024 * 1024), signature);
+    } catch (err) {
+      console.warn(JSON.stringify({
+        level: "warn",
+        event: "stripe_webhook_signature_rejected",
+        error: (err as Error).message,
+      }));
+      return json(res, 400, { error: "invalid Stripe webhook signature" });
+    }
+    try {
       await applyStripeEvent(pool, event);
       return json(res, 200, { received: true });
-    } catch {
-      return json(res, 400, { error: "invalid Stripe webhook" });
+    } catch (err) {
+      console.error(JSON.stringify({
+        level: "error",
+        event: "stripe_webhook_processing_failed",
+        stripe_event_id: event.id,
+        stripe_event_type: event.type,
+        error: (err as Error).message,
+      }));
+      return json(res, 500, { error: "Stripe webhook processing failed" });
     }
   }
 
