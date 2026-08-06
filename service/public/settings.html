@@ -88,15 +88,25 @@
           const pro = b.plan === "pro";
           el.innerHTML = `<p class="msg">Plan: <span class="pill">${escapeHtml(b.plan || "free")}</span>` +
             (b.subscription_status ? ` · ${escapeHtml(b.subscription_status)}` : "") + `</p>` +
-            `<button class="btn ${pro ? "" : "primary"}" id="billing-action" type="button">${pro || b.has_customer ? "Manage billing" : "Upgrade storage"}</button>`;
+            (pro && !b.has_customer
+              ? `<p class="muted">Pro access was granted directly. There is no Stripe subscription to manage.</p>`
+              : `<button class="btn ${b.has_customer ? "" : "primary"}" id="billing-action" type="button">${b.has_customer ? "Manage billing" : "Upgrade storage"}</button>` +
+                `<p class="msg" id="billing-msg"></p>`);
+          if (pro && !b.has_customer) return;
           $("billing-action").addEventListener("click", async () => {
-            const action = pro || b.has_customer ? "portal" : "checkout";
+            const action = b.has_customer ? "portal" : "checkout";
             const button = $("billing-action");
+            const message = $("billing-msg");
             button.disabled = true;
+            message.textContent = "Opening Stripe...";
             const out = await fetch(`/api/billing/${action}`, { method: "POST" })
-              .then((r) => (r.ok ? r.json() : null)).catch(() => null);
+              .then(async (r) => ({ ok: r.ok, ...(await r.json().catch(() => ({}))) }))
+              .catch(() => ({ ok: false, error: "Could not reach the billing service." }));
             if (out?.url) location.href = out.url;
-            else button.disabled = false;
+            else {
+              message.textContent = out?.error || "Stripe could not open the billing page. Please try again.";
+              button.disabled = false;
+            }
           });
         }
 

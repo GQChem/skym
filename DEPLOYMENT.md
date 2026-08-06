@@ -1,8 +1,9 @@
 # Production configuration
 
-This is the exact first-production setup for the hosted skym service and the
-public `skym-flow` MCP package. Replace `https://YOUR_DOMAIN` with the one
-canonical HTTPS origin before configuring OAuth or Stripe.
+This runbook upgrades the existing Railway deployment and configures the
+public `skym-flow` MCP package. The canonical production origin is currently
+`https://skym-production.up.railway.app`. Use that exact origin for Railway,
+OAuth, and Stripe until a custom domain replaces it everywhere at once.
 
 ## 1. Generate secrets
 
@@ -15,21 +16,25 @@ node -e "console.log(require('crypto').randomBytes(32).toString('base64url'))"
 
 Use one output for `STATE_SECRET` and the other for `ADMIN_TOKEN`.
 
-## 2. Railway project
+## 2. Existing Railway project
 
-1. In Railway, create a project and choose **Deploy from GitHub repo**.
-2. Select `GQChem/skym`; use branch `main` and the repository root.
+Do not create another Railway project, application service, PostgreSQL
+service, or volume. Upgrade the existing deployment in place.
+
+1. Open the existing application service and confirm it deploys
+   `GQChem/skym`, branch `main`, from the repository root.
 3. Keep the checked-in `railway.json`. It builds the monorepo, starts
    `npm start --workspace service`, and checks `/health`.
-4. Add a PostgreSQL service named `Postgres`.
-5. Add a volume to the skym application service and mount it at `/data`.
-6. In the application service's **Networking** settings, generate a Railway
-   domain or attach the final custom domain. Use only this origin everywhere.
+4. Confirm the existing PostgreSQL service is linked through `DATABASE_URL`.
+   Preserve its current reference if the service is not named `Postgres`.
+5. Note the existing volume mount path. `BLOB_DIR` must be beneath that exact
+   path; use `/data/blobs` only when the volume is mounted at `/data`.
+6. Confirm Networking lists `skym-production.up.railway.app`.
 7. In **Variables → RAW Editor**, add:
 
 ```dotenv
 DATABASE_URL=${{Postgres.DATABASE_URL}}
-PUBLIC_URL=https://YOUR_DOMAIN
+PUBLIC_URL=https://skym-production.up.railway.app
 BLOB_DIR=/data/blobs
 STATE_SECRET=FIRST_GENERATED_SECRET
 ADMIN_TOKEN=SECOND_GENERATED_SECRET
@@ -49,7 +54,8 @@ STRIPE_WEBHOOK_SECRET=
 8. Seal `STATE_SECRET`, `ADMIN_TOKEN`, both OAuth secrets,
    `STRIPE_SECRET_KEY`, and `STRIPE_WEBHOOK_SECRET` from each variable's
    three-dot menu.
-9. Deploy. Confirm `https://YOUR_DOMAIN/health` returns `{"ok":true}`.
+9. Deploy. Confirm
+   `https://skym-production.up.railway.app/health` returns `{"ok":true}`.
    Startup automatically applies migrations under a PostgreSQL advisory lock.
 10. In the Postgres service and application-volume settings, enable daily,
     weekly, and monthly backups. Perform and document one test restore before
@@ -63,9 +69,9 @@ from the deployed service.
 1. GitHub → profile picture → **Settings → Developer settings → OAuth Apps →
    New OAuth App**.
 2. Application name: `skym`.
-3. Homepage URL: `https://YOUR_DOMAIN`.
+3. Homepage URL: `https://skym-production.up.railway.app`.
 4. Authorization callback URL:
-   `https://YOUR_DOMAIN/auth/github/callback`.
+   `https://skym-production.up.railway.app/auth/github/callback`.
 5. Do not enable Device Flow; skym implements its own agent pairing.
 6. Copy the Client ID to Railway `GITHUB_CLIENT_ID`.
 7. Generate a client secret, copy it once to `GITHUB_CLIENT_SECRET`, and seal
@@ -75,15 +81,15 @@ from the deployed service.
 
 1. Create or select a Google Cloud project.
 2. In **Google Auth Platform**, configure the consent screen: app name `skym`,
-   your support email, homepage `https://YOUR_DOMAIN`, privacy URL
-   `https://YOUR_DOMAIN/privacy`, and terms URL
-   `https://YOUR_DOMAIN/terms`.
+   your support email, homepage `https://skym-production.up.railway.app`,
+   privacy URL `https://skym-production.up.railway.app/privacy`, and terms URL
+   `https://skym-production.up.railway.app/terms`.
 3. Choose the external audience. During testing, add explicit test users;
    publish the app when the policies and domain are ready.
 4. Create an OAuth client with application type **Web application**.
-5. Authorized JavaScript origin: `https://YOUR_DOMAIN`.
+5. Authorized JavaScript origin: `https://skym-production.up.railway.app`.
 6. Authorized redirect URI:
-   `https://YOUR_DOMAIN/auth/google/callback`.
+   `https://skym-production.up.railway.app/auth/google/callback`.
 7. Copy the client ID and secret into Railway `GOOGLE_CLIENT_ID` and
    `GOOGLE_CLIENT_SECRET`; seal the secret.
 
@@ -106,7 +112,8 @@ Configure sandbox mode first, then repeat the same steps in live mode.
    plan switching until another recurring price exists. Set the business name,
    support contact, privacy URL, and terms URL, then save the configuration.
 7. Stripe → **Workbench → Webhooks → Create event destination**.
-8. Endpoint URL: `https://YOUR_DOMAIN/api/billing/webhook`.
+8. Endpoint URL:
+   `https://skym-production.up.railway.app/api/billing/webhook`.
 9. Subscribe to exactly:
    - `checkout.session.completed`
    - `customer.subscription.created`
@@ -172,7 +179,7 @@ claude mcp add skym-flow -- skym-flow
 
 Copy `CLAUDE.md.example` into a disposable test project, start Claude Code,
 call `flow_init`, approve the printed code at
-`https://YOUR_DOMAIN/settings`, and verify:
+   `https://skym-production.up.railway.app/settings`, and verify:
 
 1. the chart appears in the dashboard;
 2. a figure appears and consumes storage;
