@@ -11,6 +11,8 @@ const empty = $("empty");
 const panel = $("panel");
 const detail = $("detail");
 const eventsEl = $("events");
+const commandsSection = $("commands-section");
+const commandsList = $("commands-list");
 const dot = $("live-dot");
 const lightbox = $("lightbox");
 const lightboxImg = $("lightbox-img");
@@ -20,6 +22,7 @@ let state = null;
 let selectedId = null;
 let chartParam = new URLSearchParams(location.search).get("chart");
 let ownChartId = null;
+let hosted = false;
 let theme = DEFAULT_THEME;
 let vocab = DEFAULT_VOCAB;
 /** Derived from vocab so the renderer labels custom kinds correctly. */
@@ -161,6 +164,26 @@ const draw = () => {
   else applyView();
   renderDetail();
   renderEvents();
+  void renderCommands();
+};
+
+const renderCommands = async () => {
+  if (!state?.commandsEnabled) {
+    commandsSection.hidden = true;
+    return;
+  }
+  const chartId = state.chartId || chartParam;
+  if (!chartId) return;
+  const out = await fetch(`/api/charts/${encodeURIComponent(chartId)}/commands`)
+    .then((r) => (r.ok ? r.json() : null)).catch(() => null);
+  commandsSection.hidden = false;
+  const commands = out?.commands ?? [];
+  commandsList.innerHTML = commands.length
+    ? commands.slice(0, 10).map((command) =>
+        `<li><strong>${escapeHtml(command.verb)}</strong> · ${escapeHtml(command.status)}` +
+        (command.nodeId ? `<br /><span class="muted">${escapeHtml(command.nodeId)}</span>` : "") + `</li>`
+      ).join("")
+    : `<li class="muted">No requests yet.</li>`;
 };
 
 const bindNodes = () => {
@@ -288,10 +311,27 @@ const renderLegend = () => {
 let menuNode = null;
 
 const MENU_ITEMS = [
-  { label: "Work on this", run: (n) => copy(promptFor(n)) },
+  { label: "Work on this", run: (n) => requestWork(n) },
   { label: "Copy node id", run: (n) => copy(n.id) },
   { label: "Copy node", run: (n) => copy(nodeAsText(n)) },
 ];
+
+const requestWork = async (node) => {
+  if (!state?.commandsEnabled) return copy(promptFor(node));
+  const chartId = state.chartId || chartParam;
+  if (!chartId) throw new Error("No hosted chart selected");
+  const r = await fetch(`/api/charts/${encodeURIComponent(chartId)}/commands`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      node_id: node.id,
+      verb: "work_on",
+      body: promptFor(node),
+      idempotency_key: crypto.randomUUID(),
+    }),
+  });
+  if (!r.ok) throw new Error(`Could not queue command (${r.status})`);
+};
 
 const promptFor = (n) => {
   const lines = [`Work on node "${n.id}" from the chart: ${n.title}`];
@@ -319,7 +359,7 @@ const copy = async (text) => {
 
 const openMenu = (id, x, y) => {
   const node = state?.graph.nodes.find((n) => n.id === id);
-  if (!node || state.readOnly) return;
+  if (!node) return;
   menuNode = node;
   menu.innerHTML = MENU_ITEMS.map((m, i) => `<button data-i="${i}">${escapeHtml(m.label)}</button>`).join("");
   menu.hidden = false;
@@ -329,8 +369,13 @@ const openMenu = (id, x, y) => {
   menu.style.top = `${Math.min(y, innerHeight - r.height - 8)}px`;
   for (const btn of menu.querySelectorAll("button")) {
     btn.addEventListener("click", async () => {
-      await MENU_ITEMS[Number(btn.dataset.i)].run(menuNode);
-      btn.textContent = "Copied";
+      const index = Number(btn.dataset.i);
+      try {
+        await MENU_ITEMS[index].run(menuNode);
+        btn.textContent = index === 0 && state.commandsEnabled ? "Queued" : "Copied";
+      } catch {
+        btn.textContent = "Failed";
+      }
       setTimeout(closeMenu, 550);
     });
   }
@@ -502,7 +547,7 @@ let es = null;
 
 const connect = () => {
   if (es) es.close();
-  es = new EventSource("/events");
+  es = new EventSource(chartParam ? `/events?chart=${encodeURIComponent(chartParam)}` : "/events");
   es.onopen = () => {
     dot.classList.add("live");
     dot.title = "live";
@@ -553,7 +598,7 @@ chartsEl.addEventListener("change", async () => {
   userMovedView = false;
   draw();
   // Only the live chart streams; a historical one is a static snapshot.
-  if (!chartParam) connect();
+  if (!chartParam || hosted) connect();
   else if (es) es.close();
   dot.classList.toggle("live", !chartParam);
   dot.title = chartParam ? "read-only snapshot" : "live";
@@ -576,6 +621,7 @@ const boot = async () => {
       el.title = `${w.projectDir}\nport ${w.port}`;
       el.hidden = false;
       ownChartId = w.chartId;
+      hosted = Boolean(w.hosted);
       document.title = `${w.project} · skym`;
     })
     .catch(() => {});

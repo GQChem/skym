@@ -23,6 +23,8 @@ Reusing the same title resumes that chart, so if a chat is restarted, call `flow
 - Prefer marking a branch `abandoned` over deleting it. A visible dead end tells the reader it was considered; a gap tells them nothing.
 - Use `after:` to chain nodes — it draws the edge for you.
 
+- Call `flow_inbox` at natural checkpoints to pick up work requested from the hosted chart. Mark returned commands `running` with `flow_command_state`, do the work through the normal chart tools, then mark them `done` or `failed` with a concise result.
+
 ## Content style
 
 Node bodies are **bullets, not prose**. One short clause each, no trailing periods. The server rejects paragraph-shaped bullets.

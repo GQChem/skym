@@ -1,0 +1,34 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Privacy — skym</title>
+    <link rel="stylesheet" href="/site.css" />
+  </head>
+  <body>
+    <header class="nav" id="nav"></header>
+    <main class="wrap section">
+      <div class="panel">
+        <h1>Privacy</h1>
+        <p class="sub">Last updated 6 August 2026</p>
+        <h2>What skym stores</h2>
+        <p>The hosted service stores your verified sign-in identity, project and chart metadata, chart operations created by connected agents, uploaded figures, connected-agent metadata, storage usage, and security audit events. Agent tokens and browser sessions are stored only as cryptographic hashes.</p>
+        <h2>Why it is stored</h2>
+        <p>This data is used to authenticate you, synchronize and display charts, enforce storage limits, diagnose reliability and security events, and provide exports and deletion controls.</p>
+        <h2>Local and hosted data</h2>
+        <p>The MCP server writes local chart files by default. When connected to the hosted service it also sends chart operations and attached figures. It does not upload an entire repository merely because a chart belongs to it.</p>
+        <h2>Sharing</h2>
+        <p>Chart contents and figures require an authorized account or agent credential. OAuth providers process sign-in information under their own policies. Infrastructure providers process data as needed to run the service. skym does not sell personal data.</p>
+        <h2>Your controls</h2>
+        <p>Settings lets you download account data, revoke connected agents, delete individual charts, and permanently delete your account. Local files remain under your control and are not removed by deleting the hosted account.</p>
+        <h2>Security and retention</h2>
+        <p>Access credentials are hashed server-side, figures are authorization-checked, and sensitive account actions are audited. Expired pairing and session records are removed automatically. Backups may retain deleted data for a limited operational recovery period once backup infrastructure is enabled.</p>
+        <h2>Questions</h2>
+        <p>Use the repository’s private security-reporting channel for vulnerabilities and GitHub issues for ordinary privacy questions.</p>
+      </div>
+    </main>
+    <footer class="foot" id="foot"></footer>
+    <script type="module">import { me, renderFooter, renderNav } from "/site.js"; renderFooter(); renderNav((await me())?.user ?? null, "/privacy");</script>
+  </body>
+</html>

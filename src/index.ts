@@ -669,6 +669,44 @@ server.registerTool(
 );
 
 server.registerTool(
+  "flow_inbox",
+  {
+    title: "Claim work requested from the hosted chart",
+    description:
+      "Claim the oldest queued instruction for this chart. Call at natural checkpoints. A claimed item has a thirty-minute lease and must be advanced with flow_command_state.",
+    inputSchema: {},
+  },
+  async () => {
+    const note = await ensureSync();
+    if (!sync) return ok(summary(note ?? "Hosted sync is not connected, so there is no command inbox."));
+    const command = await sync.claimCommand();
+    if (!command) return ok(summary("No queued hosted commands."));
+    return ok(summary(
+      `Claimed command ${command.id}\nVerb: ${command.verb}\nNode: ${command.nodeId ?? "(chart)"}\n\n${command.body ?? "No additional instructions."}\n\nCall flow_command_state with state:'running', then 'done' or 'failed'.`,
+    ));
+  },
+);
+
+server.registerTool(
+  "flow_command_state",
+  {
+    title: "Update a hosted command",
+    description: "Mark a command claimed through flow_inbox as running, done, or failed. Terminal states may include a concise result.",
+    inputSchema: {
+      command_id: z.string().uuid(),
+      state: z.enum(["running", "done", "failed"]),
+      result: z.string().max(8000).optional(),
+    },
+  },
+  async ({ command_id, state, result }) => {
+    await ensureSync();
+    if (!sync) return ok(summary("Hosted sync is not connected; the command state was not changed."));
+    const command = await sync.updateCommand(command_id, state, result);
+    return ok(summary(`Command ${command.id}: ${command.status}.`));
+  },
+);
+
+server.registerTool(
   "flow_show",
   {
     title: "Show the chart",

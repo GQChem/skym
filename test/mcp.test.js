@@ -15,7 +15,9 @@ import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js"
  * chart stays local; that is the path these tests cover. Verifying a *paired*
  * agent end to end needs a token and is not something a unit test should mint.
  */
-const SERVICE_URL = process.env.SKYM_TEST_SERVICE ?? "https://skym-production.up.railway.app";
+// Unit tests never create pairing rows in production. A dedicated E2E job may
+// opt into a disposable deployment through SKYM_TEST_SERVICE.
+const SERVICE_URL = process.env.SKYM_TEST_SERVICE ?? "http://127.0.0.1:9";
 
 /** Boots the real server over stdio, as Claude Code does. */
 async function boot(vocab) {
@@ -52,7 +54,7 @@ test("exposes the expected tool surface", async () => {
   try {
     const names = (await s.client.listTools()).tools.map((t) => t.name).sort();
     assert.deepEqual(names, [
-      "flow_action", "flow_chart", "flow_edge", "flow_figure", "flow_find",
+      "flow_action", "flow_chart", "flow_command_state", "flow_edge", "flow_figure", "flow_find", "flow_inbox",
       "flow_init", "flow_note", "flow_options", "flow_remove", "flow_result",
       "flow_show", "flow_state",
     ]);

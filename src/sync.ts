@@ -17,7 +17,9 @@ import type { Entry } from "./ops.js";
  * carry ids, so re-sending is free of consequence.
  */
 
-const CREDS_FILE = path.join(os.homedir(), ".skym", "credentials.json");
+/** Injectable for tests, portable installs, and managed environments. */
+const skymHome = (): string => process.env.SKYM_HOME ?? path.join(os.homedir(), ".skym");
+const credentialsFile = (): string => path.join(skymHome(), "credentials.json");
 
 export interface Credentials {
   url: string;
@@ -26,7 +28,7 @@ export interface Credentials {
 
 export function readCredentials(): Credentials | null {
   try {
-    const raw = JSON.parse(fs.readFileSync(CREDS_FILE, "utf8")) as Partial<Credentials>;
+    const raw = JSON.parse(fs.readFileSync(credentialsFile(), "utf8")) as Partial<Credentials>;
     return raw.url && raw.token ? { url: raw.url, token: raw.token } : null;
   } catch {
     return null;
@@ -34,13 +36,14 @@ export function readCredentials(): Credentials | null {
 }
 
 export function writeCredentials(creds: Credentials): void {
-  fs.mkdirSync(path.dirname(CREDS_FILE), { recursive: true });
-  fs.writeFileSync(CREDS_FILE, JSON.stringify(creds, null, 2), "utf8");
+  const file = credentialsFile();
+  fs.mkdirSync(path.dirname(file), { recursive: true });
+  fs.writeFileSync(file, JSON.stringify(creds, null, 2), "utf8");
   // The token is a bearer credential: keep it off other users' eyes where the
   // platform supports it. Windows ignores the mode, which is why this is
   // best-effort rather than a guarantee.
   try {
-    fs.chmodSync(CREDS_FILE, 0o600);
+    fs.chmodSync(file, 0o600);
   } catch {
     /* not POSIX */
   }
@@ -75,6 +78,17 @@ interface PendingUpload {
   file: string;
   path: string;
   mime: string;
+}
+
+export interface RemoteCommand {
+  id: string;
+  chartId: string;
+  nodeId: string | null;
+  verb: string;
+  body: string | null;
+  status: "claimed" | "running" | "done" | "failed";
+  createdAt: string;
+  leaseExpiresAt: string | null;
 }
 
 export class SyncClient {
@@ -159,6 +173,20 @@ export class SyncClient {
 
   get pending(): number {
     return this.queue.length + this.uploads.length;
+  }
+
+  /** Claim one queued instruction for this chart; leases make crashed agents recoverable. */
+  async claimCommand(): Promise<RemoteCommand | null> {
+    if (!this.remoteChartId) return null;
+    const out = await this.call<{ command: RemoteCommand | null }>(
+      "POST", `/api/charts/${this.remoteChartId}/commands/claim`, {},
+    );
+    return out.command;
+  }
+
+  async updateCommand(id: string, status: "running" | "done" | "failed", result?: string): Promise<RemoteCommand> {
+    const out = await this.call<{ command: RemoteCommand }>("PATCH", `/api/commands/${id}`, { status, result });
+    return out.command;
   }
 
   async flush(): Promise<void> {
@@ -303,7 +331,7 @@ export interface PairingPrompt {
   expiresIn: number;
 }
 
-const PENDING_FILE = path.join(os.homedir(), ".skym", "pending-pairing.json");
+const pendingFile = (): string => path.join(skymHome(), "pending-pairing.json");
 
 /**
  * A device code outlives the process that asked for it.
@@ -315,7 +343,7 @@ const PENDING_FILE = path.join(os.homedir(), ".skym", "pending-pairing.json");
  */
 export function readPendingPairing(): PairingPrompt | null {
   try {
-    const raw = JSON.parse(fs.readFileSync(PENDING_FILE, "utf8")) as PairingPrompt & { at?: number };
+    const raw = JSON.parse(fs.readFileSync(pendingFile(), "utf8")) as PairingPrompt & { at?: number };
     // Server-side expiry is authoritative; this just avoids a pointless call.
     if (raw.at && Date.now() - raw.at > raw.expiresIn * 1000) return null;
     return raw.deviceCode ? raw : null;
@@ -325,13 +353,14 @@ export function readPendingPairing(): PairingPrompt | null {
 }
 
 export function writePendingPairing(p: PairingPrompt): void {
-  fs.mkdirSync(path.dirname(PENDING_FILE), { recursive: true });
-  fs.writeFileSync(PENDING_FILE, JSON.stringify({ ...p, at: Date.now() }, null, 2), "utf8");
+  const file = pendingFile();
+  fs.mkdirSync(path.dirname(file), { recursive: true });
+  fs.writeFileSync(file, JSON.stringify({ ...p, at: Date.now() }, null, 2), "utf8");
 }
 
 export function clearPendingPairing(): void {
   try {
-    fs.rmSync(PENDING_FILE, { force: true });
+    fs.rmSync(pendingFile(), { force: true });
   } catch {
     /* already gone */
   }

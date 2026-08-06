@@ -23,11 +23,10 @@ export interface ResolvedConfig {
   service: string;
 }
 
-const USER_FILE = path.join(os.homedir(), ".skym", "config.json");
+const userHome = (): string => process.env.SKYM_HOME ?? path.join(os.homedir(), ".skym");
 const PROJECT_FILE = path.join(".skym", "config.json");
 
 /** The pre-vocab layout kept theme keys at the top level. */
-const LEGACY_USER_FILE = path.join(os.homedir(), ".skym", "theme.json");
 const LEGACY_PROJECT_FILE = path.join(".skym", "theme.json");
 
 function read(file: string): SkymConfig | undefined {
@@ -57,7 +56,7 @@ const DEFAULT_SERVICE = "https://skym-production.up.railway.app";
 
 /** Project settings win over user settings; both are optional. */
 export function loadConfig(projectDir: string): ResolvedConfig {
-  const user = readLayer(USER_FILE, LEGACY_USER_FILE);
+  const user = readLayer(path.join(userHome(), "config.json"), path.join(userHome(), "theme.json"));
   const project = readLayer(path.join(projectDir, PROJECT_FILE), path.join(projectDir, LEGACY_PROJECT_FILE));
 
   const vocab = resolveVocab(DEFAULT_VOCAB, user?.vocab, project?.vocab);

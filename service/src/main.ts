@@ -1,5 +1,6 @@
 import { makePool, migrate } from "./db.js";
 import { createServer } from "./server.js";
+import { cleanupExpiredAuth } from "./auth.js";
 
 const port = Number(process.env.PORT ?? 8080);
 
@@ -28,6 +29,7 @@ server.listen(port, "0.0.0.0", () => console.log(`skym service listening on ${po
 if (pool) {
   try {
     const applied = await migrate(pool);
+    await cleanupExpiredAuth(pool);
     console.log(applied.length ? `applied migrations: ${applied.join(", ")}` : "schema up to date");
     ready = true;
   } catch (err) {
@@ -36,8 +38,16 @@ if (pool) {
   }
 }
 
+const cleanupTimer = pool
+  ? setInterval(() => {
+      if (ready) cleanupExpiredAuth(pool).catch((err) => console.error(`auth cleanup failed: ${(err as Error).message}`));
+    }, 60 * 60 * 1000)
+  : null;
+cleanupTimer?.unref();
+
 const shutdown = async (signal: string): Promise<void> => {
   console.log(`${signal}: draining`);
+  if (cleanupTimer) clearInterval(cleanupTimer);
   server.close();
   if (pool) await pool.end();
   process.exit(0);

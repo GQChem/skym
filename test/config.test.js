@@ -29,6 +29,19 @@ test("a project config.json is picked up", () => {
   assert.equal(loadConfig(dir).theme.card.width, 333);
 });
 
+test("SKYM_HOME relocates user configuration", () => {
+  const prior = process.env.SKYM_HOME;
+  const home = tmp();
+  fs.writeFileSync(path.join(home, "config.json"), JSON.stringify({ storage: "service" }), "utf8");
+  process.env.SKYM_HOME = home;
+  try {
+    assert.equal(loadConfig(tmp()).storage, "service");
+  } finally {
+    if (prior === undefined) delete process.env.SKYM_HOME;
+    else process.env.SKYM_HOME = prior;
+  }
+});
+
 test("a bare theme.json still works", () => {
   const dir = tmp();
   writeConfig(dir, { card: { width: 321 } }, "theme.json");

@@ -1,5 +1,8 @@
 import assert from "node:assert/strict";
 import test from "node:test";
+import fs from "node:fs";
+import os from "node:os";
+import path from "node:path";
 import { SyncClient, awaitPairing, startPairing } from "../dist/sync.js";
 
 // A stub fetch: the point of these tests is the queue's behaviour under
@@ -451,6 +454,9 @@ test("a pending code is remembered and redeemed later", async () => {
   const { readPendingPairing, writePendingPairing, clearPendingPairing, tryRedeem } = await import(
     "../dist/sync.js"
   );
+  const priorHome = process.env.SKYM_HOME;
+  const isolatedHome = fs.mkdtempSync(path.join(os.tmpdir(), "skym-pairing-"));
+  process.env.SKYM_HOME = isolatedHome;
   clearPendingPairing();
   assert.equal(readPendingPairing(), null, "starts clean");
 
@@ -473,10 +479,28 @@ test("a pending code is remembered and redeemed later", async () => {
 
   clearPendingPairing();
   assert.equal(readPendingPairing(), null, "cleared once redeemed");
+  fs.rmSync(isolatedHome, { recursive: true, force: true });
+  if (priorHome === undefined) delete process.env.SKYM_HOME;
+  else process.env.SKYM_HOME = priorHome;
 });
 
 test("an expired pending code is reported, not retried forever", async () => {
   const { tryRedeem } = await import("../dist/sync.js");
   const f = stubFetch(() => ({ status: 410, body: { status: "expired" } }));
   assert.equal((await tryRedeem("https://svc.test", "dev-x", f)).status, "expired");
+});
+
+test("hosted commands are claimed and advanced through the attached chart", async () => {
+  const command = { id: "11111111-1111-4111-8111-111111111111", status: "claimed", body: "work" };
+  const f = stubFetch(({ url, body }) => {
+    if (url.endsWith("/api/charts/attach")) return { body: { chartId: "22222222-2222-4222-8222-222222222222" } };
+    if (url.endsWith("/commands/claim")) return { body: { command } };
+    if (url.endsWith(`/api/commands/${command.id}`)) return { body: { command: { ...command, status: body.status } } };
+    return { body: {} };
+  });
+  const c = new SyncClient({ url: "https://svc.test", token: "t", chartId: "local", fetchImpl: f });
+  await c.attach({ slug: "local", title: "Commands" });
+  assert.equal((await c.claimCommand()).id, command.id);
+  assert.equal((await c.updateCommand(command.id, "done", "finished")).status, "done");
+  assert.deepEqual(f.calls.at(-1).body, { status: "done", result: "finished" });
 });

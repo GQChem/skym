@@ -2,6 +2,12 @@
   "name": "skym-flow",
   "version": "0.1.0",
   "description": "MCP server that maintains a live project flowchart and renders it in an auto-refreshing local viewer.",
+  "keywords": ["mcp", "agents", "flowchart", "visualization", "developer-tools"],
+  "homepage": "https://github.com/GQChem/skym#readme",
+  "repository": { "type": "git", "url": "git+https://github.com/GQChem/skym.git" },
+  "bugs": { "url": "https://github.com/GQChem/skym/issues" },
+  "publishConfig": { "access": "public" },
+  "license": "MIT",
   "type": "module",
   "bin": {
     "skym-flow": "dist/index.js"

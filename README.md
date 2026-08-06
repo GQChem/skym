@@ -47,6 +47,8 @@ Node bodies are concise bullets. The server rejects prose-shaped bullets, states
 | `flow_figure` | Embed an image on a node, from a path or base64. `replace:` swaps it instead of appending. |
 | `flow_remove` | Delete a node or edge — prefer `abandoned` over deleting. |
 | `flow_show` | Return Mermaid source; `list_charts:true` lists other chats' charts. |
+| `flow_inbox` | Claim work requested from the hosted chart. |
+| `flow_command_state` | Mark a hosted request running, done, or failed. |
 
 ## Charts from data
 
@@ -169,6 +171,7 @@ Everything below is optional — the defaults are the product.
 | Env var | Default | Meaning |
 | --- | --- | --- |
 | `SKYM_SERVICE_URL` | the hosted service | Point at a different deploy, e.g. a self-hosted one. |
+| `SKYM_HOME` | `~/.skym` | Relocate credentials and user configuration. |
 | `SKYM_PROJECT_DIR` | cwd | Project root — `.flows/` is created here. |
 | `SKYM_STATE_DIR` | `<project>/.flows` | Override the chart location entirely. |
 | `SKYM_CHART_ID` | slug of title | Pin a chart directory, e.g. to resume one. |

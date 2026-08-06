@@ -4,7 +4,7 @@ Hosted charts, accounts, and the remote command queue for `skym-flow`. Deploys t
 
 ## Status
 
-Milestone 2. What works today: schema and migrations, op ingest, device-code pairing, agent tokens, chart attach/list/read, OAuth sign-in, the hosted viewer, figure blob upload, and the marketing/dashboard/settings pages. **Not built yet:** the command queue endpoints.
+What works today: schema and migrations, op ingest, device-code pairing, agent tokens, chart attach/list/read, OAuth sign-in, the hosted viewer, figure blob upload, leased and idempotent web-to-agent commands, Stripe storage subscriptions, and the marketing/dashboard/settings pages.
 
 ## Design notes
 

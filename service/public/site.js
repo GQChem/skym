@@ -92,6 +92,8 @@ export function renderFooter() {
     `<div class="wrap foot-inner">` +
     `<span>skym — a live flowchart of what your agent is doing.</span>` +
     `<span class="spacer"></span>` +
+    `<a href="/privacy">Privacy</a>` +
+    `<a href="/terms">Terms</a>` +
     `<a href="https://github.com/GQChem/skym">GitHub</a>` +
     `</div>`;
 }

@@ -1,13 +1,16 @@
 import fs from "node:fs";
 import http from "node:http";
 import path from "node:path";
+import { randomUUID } from "node:crypto";
 import { fileURLToPath } from "node:url";
 import type { Pool } from "./db.js";
 import {
   approvePairing,
   canAccessChart,
   createSession,
+  listAgentTokens,
   redeemPairing,
+  revokeAgentToken,
   resolveAgentToken,
   hashToken,
   resolveSession,
@@ -28,9 +31,18 @@ import {
 import { buildGraph, ingest } from "./ingest.js";
 import { QuotaExceeded, findFigure, haveFigures, putFigure, removeBlob, usageFor } from "./figures.js";
 import { tx } from "./db.js";
+import { recordAudit } from "./audit.js";
+import { deleteAccount, exportAccount } from "./account.js";
+import { cancelCommand, claimCommand, createCommand, listCommands, updateCommand } from "./commands.js";
+import { applyStripeEvent, billingConfigured, constructStripeEvent, createCheckout, createPortal } from "./billing.js";
 import type { Entry } from "../../src/ops.js";
 
-const MAX_BODY = 4 * 1024 * 1024;
+// Matches the advertised per-figure ceiling. JSON routes impose their own
+// semantic ceilings (notably the operation batch limit) after parsing.
+const MAX_BODY = 8 * 1024 * 1024;
+const MAX_OP_BATCH = 500;
+const DEFAULT_PAGE_SIZE = 50;
+const MAX_PAGE_SIZE = 100;
 const here = path.dirname(fileURLToPath(import.meta.url));
 // dist/service/src → service/public, and the viewer from the repo's public/.
 const publicDir = path.resolve(here, "..", "..", "..", "public");
@@ -43,6 +55,67 @@ const json = (res: http.ServerResponse, status: number, body: unknown): void => 
   res.writeHead(status, { "Content-Type": "application/json; charset=utf-8" });
   res.end(text);
 };
+
+const rateBuckets = new Map<string, { count: number; resetAt: number }>();
+
+/** Per-instance brake; the deployment edge remains the distributed limiter. */
+export function takeRateLimit(key: string, limit: number, windowMs: number, now = Date.now()): number {
+  if (rateBuckets.size > 10_000) {
+    for (const [candidate, bucket] of rateBuckets) {
+      if (bucket.resetAt <= now) rateBuckets.delete(candidate);
+    }
+  }
+  const bucket = rateBuckets.get(key);
+  if (!bucket || bucket.resetAt <= now) {
+    rateBuckets.set(key, { count: 1, resetAt: now + windowMs });
+    return 0;
+  }
+  if (bucket.count >= limit) return Math.max(1, Math.ceil((bucket.resetAt - now) / 1000));
+  bucket.count += 1;
+  return 0;
+}
+
+const clientAddress = (req: http.IncomingMessage): string => {
+  const forwarded = req.headers["x-forwarded-for"];
+  return (Array.isArray(forwarded) ? forwarded[0] : forwarded?.split(",")[0])?.trim()
+    ?? req.socket.remoteAddress
+    ?? "unknown";
+};
+
+const limited = (req: http.IncomingMessage, res: http.ServerResponse, scope: string, limit: number): boolean => {
+  const retry = takeRateLimit(`${scope}:${clientAddress(req)}`, limit, 60_000);
+  if (!retry) return false;
+  res.setHeader("Retry-After", String(retry));
+  json(res, 429, { error: "too many requests", retry_after: retry });
+  return true;
+};
+
+function securityHeaders(req: http.IncomingMessage, res: http.ServerResponse): void {
+  res.setHeader("X-Content-Type-Options", "nosniff");
+  res.setHeader("X-Frame-Options", "DENY");
+  res.setHeader("Referrer-Policy", "strict-origin-when-cross-origin");
+  res.setHeader("Permissions-Policy", "camera=(), microphone=(), geolocation=()");
+  res.setHeader("Content-Security-Policy", "default-src 'self'; img-src 'self' data: https:; style-src 'self' 'unsafe-inline'; script-src 'self' 'unsafe-inline'; object-src 'none'; base-uri 'self'; frame-ancestors 'none'");
+  if ((req.headers["x-forwarded-proto"] as string | undefined)?.split(",")[0] === "https") {
+    res.setHeader("Strict-Transport-Security", "max-age=31536000; includeSubDomains");
+  }
+}
+
+export interface ChartCursor { updatedAt: string; id: string }
+
+export const encodeChartCursor = (cursor: ChartCursor): string =>
+  Buffer.from(JSON.stringify(cursor)).toString("base64url");
+
+export function decodeChartCursor(raw: string | null): ChartCursor | null {
+  if (!raw) return null;
+  try {
+    const value = JSON.parse(Buffer.from(raw, "base64url").toString("utf8")) as Partial<ChartCursor>;
+    if (!value.id || !value.updatedAt || !/^[0-9a-f-]{36}$/i.test(value.id) || !Number.isFinite(Date.parse(value.updatedAt))) return null;
+    return { id: value.id, updatedAt: value.updatedAt };
+  } catch {
+    return null;
+  }
+}
 
 async function readBody(req: http.IncomingMessage, limit = MAX_BODY): Promise<Buffer> {
   const chunks: Buffer[] = [];
@@ -89,6 +162,21 @@ export interface BootStatus {
 
 export function createServer(pool: Pool | null, status: () => BootStatus = () => ({ ready: true, bootError: null })): http.Server {
   return http.createServer(async (req, res) => {
+    const requestId = randomUUID();
+    const startedAt = Date.now();
+    res.setHeader("X-Request-Id", requestId);
+    securityHeaders(req, res);
+    res.once("finish", () => {
+      console.log(JSON.stringify({
+        level: "info",
+        event: "http_request",
+        request_id: requestId,
+        method: req.method ?? "GET",
+        path: new URL(req.url ?? "/", "http://localhost").pathname,
+        status: res.statusCode,
+        duration_ms: Date.now() - startedAt,
+      }));
+    });
     const url = new URL(req.url ?? "/", `http://${req.headers.host ?? "localhost"}`);
 
     // Answered before anything else and without touching the database, so a
@@ -123,6 +211,20 @@ async function route({ pool, req, res, url }: Ctx): Promise<void> {
   const { pathname } = url;
   const method = req.method ?? "GET";
 
+  // Stripe signatures cover the exact raw bytes, so this must run before any
+  // JSON parser touches the request body.
+  if (pathname === "/api/billing/webhook" && method === "POST") {
+    const signature = req.headers["stripe-signature"];
+    if (!signature || Array.isArray(signature)) return json(res, 400, { error: "missing Stripe signature" });
+    try {
+      const event = constructStripeEvent(await readBody(req, 1024 * 1024), signature);
+      await applyStripeEvent(pool, event);
+      return json(res, 200, { received: true });
+    } catch {
+      return json(res, 400, { error: "invalid Stripe webhook" });
+    }
+  }
+
   // --- sign-in ---
 
   if (pathname === "/api/providers" && method === "GET") {
@@ -154,6 +256,10 @@ async function route({ pool, req, res, url }: Ctx): Promise<void> {
       const all = await pool.query<{ email: string; plan: string }>("SELECT email, plan FROM users ORDER BY created_at");
       return json(res, 404, { error: `no user with email ${body.email}`, known: all.rows });
     }
+    await recordAudit(pool, {
+      event: "plan.changed", targetType: "user", targetId: r.rows[0]!.email,
+      metadata: { plan: body.plan },
+    });
     return json(res, 200, { ok: true, user: r.rows[0] });
   }
 
@@ -209,6 +315,7 @@ async function route({ pool, req, res, url }: Ctx): Promise<void> {
 
   const authStart = pathname.match(/^\/auth\/(google|github)$/);
   if (authStart && method === "GET") {
+    if (limited(req, res, "oauth-start", 30)) return;
     const name = authStart[1] as ProviderName;
     if (!isConfigured(name)) return json(res, 501, { error: `${name} sign-in is not configured` });
     const state = signState(url.searchParams.get("return_to") ?? "/");
@@ -258,6 +365,7 @@ async function route({ pool, req, res, url }: Ctx): Promise<void> {
   // --- device-code pairing (unauthenticated by design) ---
 
   if (pathname === "/api/pair/start" && method === "POST") {
+    if (limited(req, res, "pair-start", 10)) return;
     const p = await startPairing(pool);
     return json(res, 200, {
       device_code: p.deviceCode,
@@ -268,6 +376,7 @@ async function route({ pool, req, res, url }: Ctx): Promise<void> {
   }
 
   if (pathname === "/api/pair/poll" && method === "POST") {
+    if (limited(req, res, "pair-poll", 120)) return;
     const body = await readJson<{ device_code?: string }>(req);
     if (!body.device_code) return json(res, 400, { error: "device_code required" });
     const out = await redeemPairing(pool, body.device_code);
@@ -281,6 +390,7 @@ async function route({ pool, req, res, url }: Ctx): Promise<void> {
     const body = await readJson<{ user_code?: string }>(req);
     if (!body.user_code) return json(res, 400, { error: "user_code required" });
     const ok = await approvePairing(pool, body.user_code, who.userId);
+    if (ok) await recordAudit(pool, { actorId: who.userId, event: "pairing.approved", targetType: "pairing" });
     return json(res, ok ? 200 : 404, ok ? { ok: true } : { error: "unknown or expired code" });
   }
 
@@ -302,6 +412,57 @@ async function route({ pool, req, res, url }: Ctx): Promise<void> {
 
   if (pathname === "/api/usage" && method === "GET") {
     return json(res, 200, await usageFor(pool, who.userId));
+  }
+
+  if (pathname === "/api/billing" && method === "GET") {
+    if (who.via !== "session") return json(res, 403, { error: "browser session required" });
+    const account = await pool.query(
+      "SELECT plan, subscription_status, (stripe_customer_id IS NOT NULL) AS has_customer FROM users WHERE id = $1",
+      [who.userId],
+    );
+    return json(res, 200, { configured: billingConfigured(), ...account.rows[0] });
+  }
+  if (pathname === "/api/billing/checkout" && method === "POST") {
+    if (who.via !== "session") return json(res, 403, { error: "browser session required" });
+    if (!billingConfigured()) return json(res, 503, { error: "billing is not configured" });
+    return json(res, 200, { url: await createCheckout(pool, who.userId, publicUrl(req)) });
+  }
+  if (pathname === "/api/billing/portal" && method === "POST") {
+    if (who.via !== "session") return json(res, 403, { error: "browser session required" });
+    if (!billingConfigured()) return json(res, 503, { error: "billing is not configured" });
+    return json(res, 200, { url: await createPortal(pool, who.userId, publicUrl(req)) });
+  }
+
+  if (pathname === "/api/agents" && method === "GET") {
+    if (who.via !== "session") return json(res, 403, { error: "browser session required" });
+    return json(res, 200, { agents: await listAgentTokens(pool, who.userId) });
+  }
+
+  const agentDelete = pathname.match(/^\/api\/agents\/([0-9a-f-]{36})$/i);
+  if (agentDelete && method === "DELETE") {
+    if (who.via !== "session") return json(res, 403, { error: "browser session required" });
+    const removed = await revokeAgentToken(pool, who.userId, agentDelete[1]!);
+    if (removed) await recordAudit(pool, {
+      actorId: who.userId, event: "agent.revoked", targetType: "agent_token", targetId: agentDelete[1]!,
+    });
+    return json(res, removed ? 200 : 404, removed ? { ok: true } : { error: "not found" });
+  }
+
+  if (pathname === "/api/account/export" && method === "GET") {
+    if (who.via !== "session") return json(res, 403, { error: "browser session required" });
+    res.setHeader("Content-Disposition", `attachment; filename="skym-export-${new Date().toISOString().slice(0, 10)}.json"`);
+    await recordAudit(pool, { actorId: who.userId, event: "account.exported", targetType: "user", targetId: who.userId });
+    return json(res, 200, await exportAccount(pool, who.userId));
+  }
+
+  if (pathname === "/api/account" && method === "DELETE") {
+    if (who.via !== "session") return json(res, 403, { error: "browser session required" });
+    const body = await readJson<{ confirmation?: string }>(req);
+    if (body.confirmation !== "DELETE") return json(res, 400, { error: "confirmation must be DELETE" });
+    const blobs = await deleteAccount(pool, who.userId);
+    for (const key of blobs) removeBlob(key);
+    res.setHeader("Set-Cookie", clearedCookie(req));
+    return json(res, 200, { ok: true });
   }
 
   // --- figures ---
@@ -348,7 +509,8 @@ async function route({ pool, req, res, url }: Ctx): Promise<void> {
   const figUpload = pathname.match(/^\/api\/charts\/([0-9a-f-]{36})\/figures\/(.+)$/i);
   if (figUpload && method === "PUT") {
     const chartId = figUpload[1]!;
-    if (!(await canAccessChart(pool, who.userId, chartId))) return json(res, 403, { error: "forbidden" });
+    if (who.via !== "agent") return json(res, 403, { error: "agent credential required" });
+    if (!(await canAccessChart(pool, who.userId, chartId, "write"))) return json(res, 403, { error: "forbidden" });
     const file = decodeURIComponent(figUpload[2]!);
     const mime = (req.headers["content-type"] ?? "application/octet-stream").split(";")[0]!.trim();
     try {
@@ -369,14 +531,49 @@ async function route({ pool, req, res, url }: Ctx): Promise<void> {
   // Same shapes the local viewer already fetches, so public/ runs unchanged
   // against the service: only the source of the graph differs.
 
+  if (pathname === "/events" && method === "GET") {
+    const want = url.searchParams.get("chart");
+    const chartId = want ?? (await firstChartFor(pool, who.userId));
+    if (!chartId) return json(res, 404, { error: "no charts yet" });
+    if (!(await canAccessChart(pool, who.userId, chartId))) return json(res, 403, { error: "forbidden" });
+    res.writeHead(200, {
+      "Content-Type": "text/event-stream; charset=utf-8",
+      "Cache-Control": "no-cache, no-transform",
+      Connection: "keep-alive",
+    });
+    let lastRevision = -1;
+    let sending = false;
+    const send = async () => {
+      if (sending || res.destroyed) return;
+      sending = true;
+      try {
+        const meta = await pool.query<{ revision: string }>("SELECT revision FROM charts WHERE id = $1", [chartId]);
+        const revision = Number(meta.rows[0]?.revision ?? -1);
+        if (revision !== lastRevision) {
+          const graph = await tx(pool, (c) => buildGraph(c, chartId));
+          res.write(`data: ${JSON.stringify({ graph, readOnly: true, commandsEnabled: true, chartId })}\n\n`);
+          lastRevision = revision;
+        } else {
+          res.write(": keepalive\n\n");
+        }
+      } finally {
+        sending = false;
+      }
+    };
+    await send();
+    const timer = setInterval(() => void send().catch(() => {}), 2_000);
+    timer.unref();
+    req.once("close", () => clearInterval(timer));
+    return;
+  }
+
   if (pathname === "/graph" && method === "GET") {
     const want = url.searchParams.get("chart");
     const chartId = want ?? (await firstChartFor(pool, who.userId));
     if (!chartId) return json(res, 404, { error: "no charts yet" });
     if (!(await canAccessChart(pool, who.userId, chartId))) return json(res, 403, { error: "forbidden" });
     const graph = await tx(pool, (c) => buildGraph(c, chartId));
-    // Hosted charts are a window onto the agent's work, not an editor.
-    return json(res, 200, { graph, readOnly: true });
+    return json(res, 200, { graph, readOnly: true, commandsEnabled: true, chartId });
   }
 
   if (pathname === "/charts" && method === "GET") {
@@ -418,9 +615,52 @@ async function route({ pool, req, res, url }: Ctx): Promise<void> {
     return json(res, 200, { project: r.rows[0]?.email ?? "skym", hosted: true });
   }
 
+  const commandCollection = pathname.match(/^\/api\/charts\/([0-9a-f-]{36})\/commands$/i);
+  if (commandCollection) {
+    const chartId = commandCollection[1]!;
+    if (!(await canAccessChart(pool, who.userId, chartId))) return json(res, 403, { error: "forbidden" });
+    if (method === "GET") return json(res, 200, { commands: await listCommands(pool, chartId) });
+    if (method === "POST") {
+      if (who.via !== "session") return json(res, 403, { error: "browser session required" });
+      if (!(await canAccessChart(pool, who.userId, chartId, "write"))) return json(res, 403, { error: "forbidden" });
+      const body = await readJson<{ node_id?: string; verb?: string; body?: string; idempotency_key?: string }>(req);
+      if (body.body && body.body.length > 4_000) return json(res, 413, { error: "command body exceeds 4000 characters" });
+      if (body.node_id && body.node_id.length > 200) return json(res, 400, { error: "node_id too long" });
+      const command = await createCommand(pool, {
+        chartId, userId: who.userId, nodeId: body.node_id, verb: body.verb, body: body.body,
+        idempotencyKey: body.idempotency_key,
+      });
+      return json(res, 201, { command });
+    }
+  }
+
+  const commandClaim = pathname.match(/^\/api\/charts\/([0-9a-f-]{36})\/commands\/claim$/i);
+  if (commandClaim && method === "POST") {
+    const chartId = commandClaim[1]!;
+    if (who.via !== "agent" || !who.agentId) return json(res, 403, { error: "agent credential required" });
+    if (!(await canAccessChart(pool, who.userId, chartId, "write"))) return json(res, 403, { error: "forbidden" });
+    return json(res, 200, { command: await claimCommand(pool, chartId, who.agentId) });
+  }
+
+  const commandItem = pathname.match(/^\/api\/commands\/([0-9a-f-]{36})$/i);
+  if (commandItem && method === "PATCH") {
+    if (who.via !== "agent" || !who.agentId) return json(res, 403, { error: "agent credential required" });
+    const body = await readJson<{ status?: "running" | "done" | "failed"; result?: string }>(req);
+    if (!body.status || !["running", "done", "failed"].includes(body.status)) return json(res, 400, { error: "invalid status" });
+    if (body.result && body.result.length > 8_000) return json(res, 413, { error: "result exceeds 8000 characters" });
+    const command = await updateCommand(pool, commandItem[1]!, who.agentId, body.status, body.result);
+    return json(res, command ? 200 : 409, command ? { command } : { error: "command is not claimed by this agent" });
+  }
+  if (commandItem && method === "DELETE") {
+    if (who.via !== "session") return json(res, 403, { error: "browser session required" });
+    const cancelled = await cancelCommand(pool, commandItem[1]!, who.userId);
+    return json(res, cancelled ? 200 : 409, cancelled ? { ok: true } : { error: "command cannot be cancelled" });
+  }
+
   // Attach a chart by repo key, creating the project on first sight. This is
   // what lets an agent sync without the user setting anything up first.
   if (pathname === "/api/charts/attach" && method === "POST") {
+    if (who.via !== "agent") return json(res, 403, { error: "agent credential required" });
     const body = await readJson<{ repo_key?: string; project_name?: string; slug?: string; title?: string }>(req);
     if (!body.slug) return json(res, 400, { error: "slug required" });
     const out = await attachChart(pool, who.userId, body);
@@ -433,8 +673,12 @@ async function route({ pool, req, res, url }: Ctx): Promise<void> {
     if (!(await canAccessChart(pool, who.userId, chartId))) return json(res, 403, { error: "forbidden" });
 
     if (method === "POST") {
+      if (limited(req, res, "ops", 120)) return;
+      if (who.via !== "agent") return json(res, 403, { error: "agent credential required" });
+      if (!(await canAccessChart(pool, who.userId, chartId, "write"))) return json(res, 403, { error: "forbidden" });
       const body = await readJson<{ ops?: Entry[] }>(req);
       if (!Array.isArray(body.ops)) return json(res, 400, { error: "ops[] required" });
+      if (body.ops.length > MAX_OP_BATCH) return json(res, 413, { error: `at most ${MAX_OP_BATCH} ops per batch` });
       const result = await ingest(pool, chartId, body.ops, who.userId);
       return json(res, 200, result);
     }
@@ -455,28 +699,48 @@ async function route({ pool, req, res, url }: Ctx): Promise<void> {
     const chartId = graphMatch[1]!;
     if (!(await canAccessChart(pool, who.userId, chartId))) return json(res, 403, { error: "forbidden" });
     const graph = await tx(pool, (c) => buildGraph(c, chartId));
-    return json(res, 200, { graph, readOnly: who.via === "session" });
+    return json(res, 200, { graph, readOnly: who.via === "session", commandsEnabled: who.via === "session", chartId });
   }
 
   if (pathname === "/api/charts" && method === "GET") {
-    const r = await pool.query(
+    const requested = Number(url.searchParams.get("limit") ?? DEFAULT_PAGE_SIZE);
+    const limit = Number.isInteger(requested) ? Math.max(1, Math.min(MAX_PAGE_SIZE, requested)) : DEFAULT_PAGE_SIZE;
+    const cursorRaw = url.searchParams.get("cursor");
+    const cursor = decodeChartCursor(cursorRaw);
+    if (cursorRaw && !cursor) return json(res, 400, { error: "invalid cursor" });
+    const cursorWhere = cursor ? "AND (c.updated_at, c.id) < ($2::timestamptz, $3::uuid)" : "";
+    const params = cursor
+      ? [who.userId, cursor.updatedAt, cursor.id, limit + 1]
+      : [who.userId, limit + 1];
+    const limitParam = cursor ? "$4" : "$2";
+    const r = await pool.query<{
+      id: string; slug: string; title: string; revision: string; updated_at: Date; project: string; ops: number;
+    }>(
       `SELECT c.id, c.slug, c.title, c.revision, c.updated_at, p.name AS project,
               (SELECT count(*) FROM ops o WHERE o.chart_id = c.id)::int AS ops
          FROM charts c
          JOIN projects p ON p.id = c.project_id
         WHERE ${VISIBLE_TO}
-        ORDER BY c.updated_at DESC
-        LIMIT 200`,
-      [who.userId],
+          ${cursorWhere}
+        ORDER BY c.updated_at DESC, c.id DESC
+        LIMIT ${limitParam}`,
+      params,
     );
-    return json(res, 200, { charts: r.rows });
+    const hasMore = r.rows.length > limit;
+    const charts = r.rows.slice(0, limit);
+    const last = charts.at(-1);
+    const nextCursor = hasMore && last
+      ? encodeChartCursor({ updatedAt: new Date(last.updated_at).toISOString(), id: last.id })
+      : null;
+    return json(res, 200, { charts, next_cursor: nextCursor });
   }
 
   const chartDelete = pathname.match(/^\/api\/charts\/([0-9a-f-]{36})$/i);
   if (chartDelete && method === "DELETE") {
     const chartId = chartDelete[1]!;
-    if (!(await canAccessChart(pool, who.userId, chartId))) return json(res, 403, { error: "forbidden" });
-    await deleteChart(pool, chartId);
+    if (who.via !== "session") return json(res, 403, { error: "browser session required" });
+    if (!(await canAccessChart(pool, who.userId, chartId, "delete"))) return json(res, 403, { error: "forbidden" });
+    await deleteChart(pool, chartId, who.userId);
     return json(res, 200, { ok: true });
   }
 
@@ -492,13 +756,18 @@ async function route({ pool, req, res, url }: Ctx): Promise<void> {
  * a leftover row whose blob is gone is recoverable, a file with no row is not
  * attributable to anything and can never be cleaned up.
  */
-async function deleteChart(pool: Pool, chartId: string): Promise<void> {
-  const blobs = await pool.query<{ storage_key: string }>(
-    "SELECT storage_key FROM figures WHERE chart_id = $1",
-    [chartId],
-  );
-  for (const row of blobs.rows) removeBlob(row.storage_key);
-  await pool.query("DELETE FROM charts WHERE id = $1", [chartId]);
+async function deleteChart(pool: Pool, chartId: string, actorId: string): Promise<void> {
+  const keys = await tx(pool, async (client) => {
+    const blobs = await client.query<{ storage_key: string }>(
+      "SELECT storage_key FROM figures WHERE chart_id = $1", [chartId],
+    );
+    await recordAudit(client, { actorId, event: "chart.deleted", targetType: "chart", targetId: chartId });
+    await client.query("DELETE FROM charts WHERE id = $1", [chartId]);
+    return blobs.rows.map((row) => row.storage_key);
+  });
+  // Database first: a failed unlink leaves an orphan that reconciliation can
+  // remove, never a live chart whose evidence has silently disappeared.
+  for (const key of keys) removeBlob(key);
 }
 
 /**
@@ -538,6 +807,8 @@ const PAGES: Record<string, string> = {
   "/": "index.html",
   "/dashboard": "dashboard.html",
   "/settings": "settings.html",
+  "/privacy": "privacy.html",
+  "/terms": "terms.html",
   // The pairing URL printed in the terminal; settings is where the code goes.
   "/pair": "settings.html",
 };

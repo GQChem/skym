@@ -45,9 +45,19 @@
           `<p class="msg" id="msg"></p>` +
           `</div>` +
           `<div class="panel">` +
+          `<h2>Connected agents</h2>` +
+          `<p class="sub">Revoke machines you no longer use. A revoked agent must pair again before it can sync.</p>` +
+          `<div id="agents" class="muted">Checkingâ€¦</div>` +
+          `</div>` +
+          `<div class="panel">` +
           `<h2>Storage</h2>` +
           `<p class="sub">Figures your agents have uploaded.</p>` +
           `<div id="usage" class="muted">Checking…</div>` +
+          `</div>` +
+          `<div class="panel">` +
+          `<h2>Billing</h2>` +
+          `<p class="sub">The product stays fully featured; paid plans only increase hosted artifact storage.</p>` +
+          `<div id="billing" class="muted">Checking...</div>` +
           `</div>` +
           `<div class="panel">` +
           `<h2>Account</h2>` +
@@ -55,9 +65,72 @@
           `<dt>Email</dt><dd>${escapeHtml(user.email)}</dd>` +
           (user.name ? `<dt>Name</dt><dd>${escapeHtml(user.name)}</dd>` : "") +
           `</dl>` +
+          `<p><a class="btn" href="/api/account/export">Download my data</a></p>` +
+          `</div>` +
+          `<div class="panel">` +
+          `<h2>Delete account</h2>` +
+          `<p class="sub">Permanently delete your account, owned projects, charts, operations, figures, and connected-agent credentials. Download your data first if you need a copy.</p>` +
+          `<button class="btn danger" id="delete-account" type="button">Delete account</button>` +
+          `<p class="msg" id="delete-msg"></p>` +
           `</div>`;
 
         renderUsage();
+        renderAgents();
+        renderBilling();
+
+        async function renderBilling() {
+          const b = await fetch("/api/billing").then((r) => (r.ok ? r.json() : null)).catch(() => null);
+          const el = $("billing");
+          if (!b?.configured) {
+            el.textContent = "Paid storage is not available on this deployment yet.";
+            return;
+          }
+          const pro = b.plan === "pro";
+          el.innerHTML = `<p class="msg">Plan: <span class="pill">${escapeHtml(b.plan || "free")}</span>` +
+            (b.subscription_status ? ` · ${escapeHtml(b.subscription_status)}` : "") + `</p>` +
+            `<button class="btn ${pro ? "" : "primary"}" id="billing-action" type="button">${pro || b.has_customer ? "Manage billing" : "Upgrade storage"}</button>`;
+          $("billing-action").addEventListener("click", async () => {
+            const action = pro || b.has_customer ? "portal" : "checkout";
+            const button = $("billing-action");
+            button.disabled = true;
+            const out = await fetch(`/api/billing/${action}`, { method: "POST" })
+              .then((r) => (r.ok ? r.json() : null)).catch(() => null);
+            if (out?.url) location.href = out.url;
+            else button.disabled = false;
+          });
+        }
+
+        async function renderAgents() {
+          const out = await fetch("/api/agents")
+            .then((r) => (r.ok ? r.json() : null))
+            .catch(() => null);
+          const el = $("agents");
+          if (!out) {
+            el.textContent = "Connected agents are unavailable right now.";
+            return;
+          }
+          if (!out.agents?.length) {
+            el.textContent = "No agents connected.";
+            return;
+          }
+          el.innerHTML = out.agents.map((agent) =>
+            `<div class="field-row" data-agent="${escapeHtml(agent.id)}">` +
+            `<div><strong>${escapeHtml(agent.label || "skym-flow agent")}</strong>` +
+            `<p class="msg">${agent.lastUsedAt ? `Last used ${escapeHtml(new Date(agent.lastUsedAt).toLocaleString())}` : "Not used yet"}</p></div>` +
+            `<span class="spacer"></span>` +
+            `<button class="btn danger" type="button" data-revoke="${escapeHtml(agent.id)}">Revoke</button>` +
+            `</div>`
+          ).join("");
+          for (const button of el.querySelectorAll("[data-revoke]")) {
+            button.addEventListener("click", async () => {
+              if (!confirm("Revoke this agent? It will stop syncing immediately.")) return;
+              button.disabled = true;
+              const r = await fetch(`/api/agents/${encodeURIComponent(button.dataset.revoke)}`, { method: "DELETE" }).catch(() => null);
+              if (r?.ok) renderAgents();
+              else button.disabled = false;
+            });
+          }
+        }
 
         async function renderUsage() {
           const u = await fetch("/api/usage")
@@ -100,6 +173,25 @@
         $("approve").addEventListener("click", approve);
         $("code").addEventListener("keydown", (e) => {
           if (e.key === "Enter") approve();
+        });
+
+        $("delete-account").addEventListener("click", async () => {
+          const confirmation = prompt('Type DELETE to permanently delete your skym account.');
+          if (confirmation !== "DELETE") return;
+          const button = $("delete-account");
+          const msg = $("delete-msg");
+          button.disabled = true;
+          const r = await fetch("/api/account", {
+            method: "DELETE",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ confirmation }),
+          }).catch(() => null);
+          if (r?.ok) location.href = "/";
+          else {
+            button.disabled = false;
+            msg.className = "msg bad";
+            msg.textContent = "Could not delete the account. Nothing else was requested; try again.";
+          }
         });
       }
     </script>
