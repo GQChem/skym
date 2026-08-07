@@ -68,6 +68,20 @@ test("more bullets make a taller card", () => {
   assert.ok(many.h > few.h);
 });
 
+test("a kind can hide its bullets without changing the node data", () => {
+  const m = measureNode(node({ bullets: ["one", "two"] }), DEFAULT_THEME, false, "full", undefined, {
+    action: { bullets: false },
+  });
+  assert.equal(m.bulletLines.length, 0);
+  assert.equal(m.node.bullets.length, 2);
+});
+
+test("a kind can override the chart-level figure toggle", () => {
+  const withFigure = node({ figures: [{ file: "plot.svg" }] });
+  assert.ok(measureNode(withFigure, DEFAULT_THEME, false, "full", undefined, { action: { figures: "show" } }).figure);
+  assert.equal(measureNode(withFigure, DEFAULT_THEME, true, "full", undefined, { action: { figures: "hide" } }).figure, undefined);
+});
+
 test("bullets past the cap are counted, not rendered", () => {
   const bullets = Array.from({ length: 20 }, (_, i) => `bullet number ${i}`);
   const m = measureNode(node({ bullets }), DEFAULT_THEME, false);

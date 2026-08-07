@@ -129,7 +129,7 @@ Any subset works; unspecified values fall through. Note that state colours were 
 
 ## Templates: choosing the node vocabulary
 
-Which kinds a chart may contain, and which states each carries, is per-project data. One tool is generated per kind — a project using the `research` template gets `flow_question`, `flow_experiment`, and `flow_finding` instead of `flow_action` and `flow_result`, each with its own states and its own description.
+Which kinds a chart may contain, and which states each carries, can be configured globally in `~/.skym/config.json` and overridden per project in `.skym/config.json`. One tool is generated per kind — a project using the `research` template gets `flow_question`, `flow_experiment`, and `flow_finding` instead of `flow_action` and `flow_result`, each with its own states and its own description. The viewer's **Design** dialog builds these settings visually and can copy the correct file contents for either scope.
 
 Pick a builtin template:
 
@@ -164,6 +164,25 @@ Or define a kind of your own, which is added alongside the template's:
 ```
 
 A state may also set `"pulse": true` to animate the card's stripe while the work is live, and `"open": true` to count as unresolved in `flow_find`. Charts are stored with their kind and state as plain strings, so a chart written under one template still opens under another — an unrecognised state simply draws in neutral ink.
+
+Each kind can also control both agent output and card presentation:
+
+```json
+{
+  "vocab": { "kinds": [{
+    "slug": "result",
+    "content": {
+      "template": "Lead with the key finding and keep evidence concrete.",
+      "title": "One short key concept.",
+      "bullets": "Measurements, properties and trade-offs; one fact per point.",
+      "figure": "Whenever possible generate a figure using a restrained indigo and green palette."
+    },
+    "presentation": { "typeLabel": "left", "bullets": true, "figures": "show" }
+  }] }
+}
+```
+
+`typeLabel` accepts `top`, `left`, or `hidden`; `figures` accepts `inherit`, `show`, or `hide`. Restart the MCP server after changing a config file because node tools and their instructions are generated when the server starts.
 
 ## The service
 

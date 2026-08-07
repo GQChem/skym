@@ -48,6 +48,23 @@ export interface KindDef {
    * from this node outward, dashed, and the parameter is `about` not `after`.
    */
   attaches?: boolean;
+  /** Instructions applied to this kind's generated content and exposed to the agent. */
+  content?: KindContentTemplate;
+  /** Card-level display choices, shared by local and hosted viewers. */
+  presentation?: KindPresentation;
+}
+
+export interface KindContentTemplate {
+  template?: string;
+  title?: string;
+  bullets?: string;
+  figure?: string;
+}
+
+export interface KindPresentation {
+  typeLabel?: "top" | "left" | "hidden";
+  bullets?: boolean;
+  figures?: "inherit" | "show" | "hide";
 }
 
 export interface Vocabulary {
@@ -324,9 +341,15 @@ export function resolveVocab(base: Vocabulary, ...overrides: (VocabOverride | un
       byslug.set(patch.slug, {
         ...(existing ?? { label: patch.slug, blurb: "", states: [], defaultState: "" }),
         ...patch,
+        content: { ...existing?.content, ...patch.content },
+        presentation: { ...existing?.presentation, ...patch.presentation },
       } as KindDef);
     }
     out = { ...out, kinds: [...byslug.values()] };
   }
   return out;
+}
+
+export function kindPresentations(vocab: Vocabulary): Record<string, KindPresentation> {
+  return Object.fromEntries(vocab.kinds.map((k) => [k.slug, k.presentation ?? {}]));
 }

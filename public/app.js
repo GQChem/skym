@@ -2,7 +2,7 @@ import dagre from "./vendor/dagre.js";
 import { detailForZoom, layoutGraph } from "./vendor/layout.js";
 import { renderSvg } from "./vendor/render.js";
 import { DEFAULT_THEME, KIND_LABEL, STATE_GLYPH, paletteFor, resolveTheme } from "./vendor/theme.js";
-import { DEFAULT_VOCAB, glyphs, kindLabels, pulseStates } from "./vendor/vocab.js";
+import { DEFAULT_VOCAB, glyphs, kindLabels, kindPresentations, pulseStates, resolveVocab } from "./vendor/vocab.js";
 
 const $ = (id) => document.getElementById(id);
 const canvas = $("canvas");
@@ -33,6 +33,8 @@ let vocab = DEFAULT_VOCAB;
 let vocabGlyphs = glyphs(DEFAULT_VOCAB);
 let vocabLabels = kindLabels(DEFAULT_VOCAB);
 let vocabPulse = pulseStates(DEFAULT_VOCAB);
+let vocabPresentation = kindPresentations(DEFAULT_VOCAB);
+let serviceVocab = DEFAULT_VOCAB;
 let lastLayout = null;
 
 const store = {
@@ -65,11 +67,21 @@ const assetUrl = (file) =>
 const applyConfig = (config) => {
   if (config?.theme) theme = config.theme;
   if (config?.vocab?.kinds?.length) {
-    vocab = config.vocab;
-    vocabGlyphs = glyphs(vocab);
-    vocabLabels = kindLabels(vocab);
-    vocabPulse = pulseStates(vocab);
+    serviceVocab = config.vocab;
   }
+  applyDesignLayers();
+};
+
+const designKey = (scope) => scope === "global" ? "design-global" : `design-project-${chartParam || ownChartId || "local"}`;
+const readDesign = (scope) => {
+  try { return JSON.parse(store.get(designKey(scope), "{}")); } catch { return {}; }
+};
+const applyDesignLayers = () => {
+  vocab = resolveVocab(serviceVocab, readDesign("global"), readDesign("project"));
+  vocabGlyphs = glyphs(vocab);
+  vocabLabels = kindLabels(vocab);
+  vocabPulse = pulseStates(vocab);
+  vocabPresentation = kindPresentations(vocab);
 };
 
 // --- view transform ---
@@ -153,7 +165,7 @@ const draw = () => {
   }
 
   detailLevel = detailMode === "auto" ? detailForZoom(view.k) : detailMode;
-  lastLayout = layoutGraph(graph, theme, dagre, showFigures, detailLevel, vocabLabels);
+  lastLayout = layoutGraph(graph, theme, dagre, showFigures, detailLevel, vocabLabels, vocabPresentation);
   canvas.innerHTML = renderSvg(lastLayout, {
     glyphs: vocabGlyphs,
     kindLabels: vocabLabels,
@@ -312,7 +324,7 @@ const renderLegend = () => {
     .map(
       (k) =>
         `<div class="leg-group">` +
-        `<div class="leg-kind">${escapeHtml(k.label)}<span>${escapeHtml(k.blurb)}</span></div>` +
+        `<div class="leg-kind" title="${escapeHtml(k.blurb)}">${escapeHtml(k.label)}</div>` +
         k.states
           .map((s) => {
             const ink = palette.states[s.slug] ?? palette.neutral;
@@ -323,7 +335,7 @@ const renderLegend = () => {
               `<span class="leg-stripe" style="background:${ink.accent}"></span>` +
               `<span class="leg-glyph" style="color:${ink.accent}">${escapeHtml(s.glyph)}</span>` +
               `</span>` +
-              `<b>${escapeHtml(s.label)}</b><span class="muted">${escapeHtml(s.blurb)}</span></div>`
+              `<b title="${escapeHtml(s.blurb)}">${escapeHtml(s.label)}</b></div>`
             );
           })
           .join("") +
@@ -388,6 +400,111 @@ const requestWork = async (node) => {
   if (!r.ok) throw new Error(`Could not queue command (${r.status})`);
   return true;
 };
+
+// --- node design system ---
+
+const designDialog = $("design-dialog");
+const designScope = $("design-scope");
+const designKind = $("design-kind");
+let editingSlug = "";
+
+const kindBySlug = (slug) => vocab.kinds.find((k) => k.slug === slug);
+const setField = (id, value) => { $(id).value = value ?? ""; };
+
+const populateKindPicker = (preferred) => {
+  designKind.innerHTML = vocab.kinds.map((k) => `<option value="${escapeHtml(k.slug)}">${escapeHtml(k.label)}</option>`).join("");
+  editingSlug = preferred && kindBySlug(preferred) ? preferred : (vocab.kinds[0]?.slug ?? "");
+  designKind.value = editingSlug;
+  loadKindEditor();
+};
+
+const loadKindEditor = () => {
+  editingSlug = designKind.value;
+  const scoped = designScope.value === "global"
+    ? resolveVocab(serviceVocab, readDesign("global"))
+    : resolveVocab(serviceVocab, readDesign("global"), readDesign("project"));
+  const kind = scoped.kinds.find((k) => k.slug === editingSlug) ?? kindBySlug(editingSlug);
+  if (!kind) return;
+  setField("kind-label", kind.label);
+  setField("kind-label-position", kind.presentation?.typeLabel ?? "top");
+  $("kind-bullets").checked = kind.presentation?.bullets !== false;
+  setField("kind-figures", kind.presentation?.figures ?? "inherit");
+  setField("kind-template", kind.content?.template);
+  setField("kind-title-rule", kind.content?.title);
+  setField("kind-bullet-rule", kind.content?.bullets);
+  setField("kind-figure-rule", kind.content?.figure);
+};
+
+const editorPatch = () => ({
+  slug: editingSlug,
+  label: $("kind-label").value.trim() || editingSlug,
+  presentation: {
+    typeLabel: $("kind-label-position").value,
+    bullets: $("kind-bullets").checked,
+    figures: $("kind-figures").value,
+  },
+  content: {
+    template: $("kind-template").value.trim(),
+    title: $("kind-title-rule").value.trim(),
+    bullets: $("kind-bullet-rule").value.trim(),
+    figure: $("kind-figure-rule").value.trim(),
+  },
+});
+
+const saveKindDesign = () => {
+  if (!editingSlug) return;
+  const scope = designScope.value;
+  const layer = readDesign(scope);
+  const kinds = [...(layer.kinds ?? [])];
+  const index = kinds.findIndex((k) => k.slug === editingSlug);
+  const patch = editorPatch();
+  if (index >= 0) kinds[index] = { ...kinds[index], ...patch };
+  else kinds.push(patch);
+  const next = { ...layer, kinds };
+  store.set(designKey(scope), JSON.stringify(next));
+  applyDesignLayers();
+  renderLegend();
+  draw();
+  $("design-status").textContent = `${scope === "global" ? "Global" : "Project"} preview saved in this browser.`;
+};
+
+$("customize").addEventListener("click", () => {
+  populateKindPicker(editingSlug);
+  designDialog.showModal();
+});
+$("design-close").addEventListener("click", () => designDialog.close());
+designKind.addEventListener("change", loadKindEditor);
+designScope.addEventListener("change", () => populateKindPicker(editingSlug));
+$("design-save").addEventListener("click", saveKindDesign);
+for (const id of ["kind-label", "kind-label-position", "kind-bullets", "kind-figures", "kind-template", "kind-title-rule", "kind-bullet-rule", "kind-figure-rule"]) {
+  $(id).addEventListener("change", saveKindDesign);
+}
+$("design-copy").addEventListener("click", async () => {
+  saveKindDesign();
+  const scope = designScope.value;
+  await copy(JSON.stringify({ vocab: readDesign(scope) }, null, 2));
+  $("design-status").textContent = `Copied. Save as ${scope === "global" ? "~/.skym/config.json" : ".skym/config.json"}; restart the agent.`;
+});
+$("design-add").addEventListener("click", () => {
+  const label = prompt("Name the new node type");
+  if (!label?.trim()) return;
+  const slug = label.trim().toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "");
+  if (!slug || kindBySlug(slug)) return;
+  const seed = vocab.kinds.find((k) => k.slug === "action") ?? vocab.kinds[0];
+  const scope = designScope.value;
+  const layer = readDesign(scope);
+  const created = {
+    slug, label: label.trim(), blurb: `A ${label.trim()} node.`,
+    states: structuredClone(seed.states), defaultState: seed.defaultState,
+    presentation: { typeLabel: "top", bullets: true, figures: "inherit" },
+    content: { template: `Use this node for ${label.trim().toLowerCase()} information.` },
+  };
+  store.set(designKey(scope), JSON.stringify({ ...layer, kinds: [...(layer.kinds ?? []), created] }));
+  applyDesignLayers();
+  renderLegend();
+  draw();
+  populateKindPicker(slug);
+});
 
 const promptFor = (n) => {
   const lines = [`Work on node "${n.id}" from the chart: ${n.title}`];

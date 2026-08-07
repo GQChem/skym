@@ -678,7 +678,7 @@ async function route({ pool, req, res, url }: Ctx): Promise<void> {
   // what lets an agent sync without the user setting anything up first.
   if (pathname === "/api/charts/attach" && method === "POST") {
     if (who.via !== "agent") return json(res, 403, { error: "agent credential required" });
-    const body = await readJson<{ repo_key?: string; project_name?: string; slug?: string; title?: string }>(req);
+    const body = await readJson<{ repo_key?: string; project_name?: string; slug?: string; title?: string; vocab?: unknown }>(req);
     if (!body.slug) return json(res, 400, { error: "slug required" });
     const out = await attachChart(pool, who.userId, body);
     return json(res, 200, out);
@@ -904,7 +904,7 @@ async function firstChartFor(pool: Pool, userId: string): Promise<string | null>
 async function attachChart(
   pool: Pool,
   userId: string,
-  body: { repo_key?: string; project_name?: string; slug?: string; title?: string },
+  body: { repo_key?: string; project_name?: string; slug?: string; title?: string; vocab?: unknown },
 ): Promise<{ chartId: string; projectId: string; revision: number }> {
   return tx(pool, async (c) => {
     let projectId: string | undefined;
@@ -930,10 +930,11 @@ async function attachChart(
     }
 
     const chart = await c.query<{ id: string; revision: string }>(
-      `INSERT INTO charts (project_id, slug, title) VALUES ($1, $2, $3)
-       ON CONFLICT (project_id, slug) DO UPDATE SET title = EXCLUDED.title, updated_at = now()
+      `INSERT INTO charts (project_id, slug, title, vocab) VALUES ($1, $2, $3, $4)
+       ON CONFLICT (project_id, slug) DO UPDATE SET title = EXCLUDED.title,
+         vocab = COALESCE(EXCLUDED.vocab, charts.vocab), updated_at = now()
        RETURNING id, revision`,
-      [projectId, body.slug, body.title ?? body.slug],
+      [projectId, body.slug, body.title ?? body.slug, body.vocab ?? null],
     );
     const row = chart.rows[0]!;
     return { chartId: row.id, projectId, revision: Number(row.revision) };

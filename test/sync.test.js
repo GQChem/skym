@@ -51,6 +51,15 @@ test("attach resolves the remote chart id", async () => {
   await c.close();
 });
 
+test("attach sends the resolved vocabulary to the hosted viewer", async () => {
+  const f = stubFetch(() => ({ body: { chartId: "remote-1" } }));
+  const vocab = { name: "custom", kinds: [] };
+  const c = new SyncClient({ url: "https://svc.test", token: "tok", chartId: "local", fetchImpl: f });
+  await c.attach({ slug: "chart", title: "Chart", vocab });
+  assert.deepEqual(f.calls[0].body.vocab, vocab);
+  await c.close();
+});
+
 test("enqueue never throws and never blocks", async () => {
   const f = stubFetch(() => ({ body: { chartId: "remote-1" } }));
   const c = await client(f);

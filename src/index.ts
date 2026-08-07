@@ -130,6 +130,7 @@ async function ensureSync(): Promise<string | null> {
       projectName: path.basename(projectDir),
       slug: store.chartId,
       title: store.get().title,
+      vocab,
     });
   } catch (err) {
     return `Chart is local only — the service rejected it: ${(err as Error).message}`;
@@ -330,8 +331,8 @@ function registerKindTool(kind: KindDef): void {
 
   const common = {
     id: z.string().min(1).describe(`Stable slug, e.g. 'try-redis-cache'. Reuse it to update this ${kind.slug} node.`),
-    title: z.string().optional().describe("Short headline."),
-    bullets: bulletsSchema.optional(),
+    title: z.string().optional().describe(kind.content?.title ?? "Short headline with the key concept."),
+    bullets: bulletsSchema.optional().describe(kind.content?.bullets ?? "Concise supporting points."),
     state: z.enum(states).optional().describe(stateProse(kind)),
     group: z.string().optional().describe("Optional lane, e.g. 'Caching' — clusters related branches."),
   };
@@ -363,7 +364,7 @@ function registerKindTool(kind: KindDef): void {
     `flow_${kind.slug}`,
     {
       title: `Add or update a ${kind.slug} node`,
-      description: `${kind.blurb} Body must be concise bullets.`,
+      description: [kind.blurb, kind.content?.template, kind.content?.figure].filter(Boolean).join(" "),
       inputSchema: shape,
     },
     async (args: Record<string, unknown>) => {
@@ -422,7 +423,7 @@ function registerKindTool(kind: KindDef): void {
       const node = store.findNode(id)!;
       let hint: string | undefined;
       if (kind.wantsFigure && node.figures.length === 0) {
-        hint =
+        hint = kind.content?.figure ??
           "No figure attached. If this has anything visual — a plot, screenshot, or diagram — attach it with flow_figure.";
       } else if (state === "done") {
         const resultKind = vocab.kinds.find((k) => k.wantsFigure);

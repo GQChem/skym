@@ -29,6 +29,7 @@
         <button id="fit" title="Fit to screen">Fit</button>
         <button id="positive-only" title="Show successful outcomes and the paths that led to them">Positive</button>
         <button id="inline-figs" title="Show figures inline on the chart">Figures</button>
+        <button id="customize" title="Customize node types and content rules">Design</button>
         <button id="theme" title="Toggle light/dark">Theme</button>
         <button id="export" title="Download SVG">SVG</button>
         <button id="panel-toggle" title="Toggle details panel">Details</button>
@@ -75,6 +76,42 @@
         <div class="dialog-actions">
           <button value="cancel" type="button" id="request-cancel">Cancel</button>
           <button value="submit" type="submit" class="active">Queue request</button>
+        </div>
+      </form>
+    </dialog>
+
+    <dialog id="design-dialog" class="design-dialog">
+      <form method="dialog" id="design-form">
+        <div class="dialog-head">
+          <div><span class="dialog-kicker">Node system</span><h2>Design your chart language</h2></div>
+          <button type="button" id="design-close" class="icon-btn" aria-label="Close">×</button>
+        </div>
+        <p class="muted">Choose what each node contains and how it appears. Project settings override global defaults.</p>
+        <div class="design-topline">
+          <label>Scope<select id="design-scope"><option value="project">This project</option><option value="global">All projects</option></select></label>
+          <label>Node type<select id="design-kind"></select></label>
+          <button type="button" id="design-add">+ New type</button>
+        </div>
+        <div class="design-grid">
+          <fieldset>
+            <legend>Identity & layout</legend>
+            <label>Name<input id="kind-label" type="text" maxlength="40" /></label>
+            <label>Type label<select id="kind-label-position"><option value="top">Above title</option><option value="left">Left, vertical</option><option value="hidden">Hidden</option></select></label>
+            <label class="check"><input id="kind-bullets" type="checkbox" /> Show bullet points</label>
+            <label>Figures<select id="kind-figures"><option value="inherit">Use chart setting</option><option value="show">Always show</option><option value="hide">Always hide</option></select></label>
+          </fieldset>
+          <fieldset>
+            <legend>Agent content template</legend>
+            <label>Overall instruction<textarea id="kind-template" rows="3" placeholder="Lead with the key concept; keep evidence concrete…"></textarea></label>
+            <label>Title instruction<input id="kind-title-rule" type="text" placeholder="One concise key concept" /></label>
+            <label>Points instruction<textarea id="kind-bullet-rule" rows="2" placeholder="Properties, evidence and trade-offs; one fact per point"></textarea></label>
+            <label>Figure instruction<textarea id="kind-figure-rule" rows="3" placeholder="When possible generate a figure; use this palette and style…"></textarea></label>
+          </fieldset>
+        </div>
+        <div class="design-actions">
+          <span id="design-status" class="muted">Preview updates immediately.</span>
+          <button type="button" id="design-copy">Copy config</button>
+          <button type="button" id="design-save" class="active">Save preview</button>
         </div>
       </form>
     </dialog>

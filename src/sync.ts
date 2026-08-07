@@ -2,6 +2,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import type { Entry } from "./ops.js";
+import type { Vocabulary } from "./vocab.js";
 
 /**
  * Ships ops to the service without ever blocking a tool call.
@@ -64,6 +65,7 @@ interface AttachInput {
   projectName?: string;
   slug: string;
   title: string;
+  vocab?: Vocabulary;
 }
 
 /**
@@ -116,6 +118,7 @@ export class SyncClient {
       project_name: input.projectName,
       slug: input.slug,
       title: input.title,
+      vocab: input.vocab,
     });
     this.remoteChartId = body.chartId;
     // Kept so a later reattach lands in the same project rather than creating
@@ -142,6 +145,7 @@ export class SyncClient {
       project_name: this.lastAttach?.projectName,
       slug,
       title,
+      vocab: this.lastAttach?.vocab,
     });
     this.remoteChartId = body.chartId;
     this.attachedSlug = slug;

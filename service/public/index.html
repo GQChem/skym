@@ -15,49 +15,61 @@
     <header class="nav" id="nav"></header>
 
     <main>
-      <section class="hero wrap">
-        <span class="eyebrow">MCP server for coding agents · build from source</span>
-        <h1>See what your agent is actually doing.</h1>
-        <p class="lede">
-          skym keeps a live flowchart of your agent's work — every question it asked, every experiment it ran, and every
-          result it found — so a long session stays legible instead of scrolling away.
-        </p>
-        <div class="hero-actions">
-          <a class="btn primary lg" href="/dashboard">Get started</a>
-          <a class="btn lg" href="#how">How it works</a>
+      <section class="hero wrap hero-split">
+        <div class="hero-copy">
+          <span class="eyebrow"><i></i> Live workspace for AI agents</span>
+          <h1>Turn agent work into a map you can trust.</h1>
+          <p class="lede">skym transforms questions, attempts, decisions and evidence into a living project tree. See the useful path, inspect the dead ends, and send focused work back to your agent.</p>
+          <div class="hero-actions">
+            <a class="btn primary lg" href="/dashboard">Open your workspace <span>→</span></a>
+            <a class="btn lg" href="#how">See how it works</a>
+          </div>
+          <div class="hero-proof"><span>✓ GitHub sign-in</span><span>✓ Live sync</span><span>✓ Your node language</span></div>
+        </div>
+        <div class="product-preview" aria-label="Example skym project tree">
+          <div class="preview-bar"><span class="preview-brand">skym</span><span>Protein design run</span><b>Live</b></div>
+          <div class="preview-canvas">
+            <div class="preview-node n1"><small>◐ ACTION · DONE</small><strong>Compare candidates</strong><span>Screen affinity and stability</span></div>
+            <div class="preview-line l1"></div><div class="preview-line l2"></div>
+            <div class="preview-node n2"><small>✓ RESULT · GOOD</small><strong>Candidate B leads</strong><span>2.4× predicted affinity</span><em></em></div>
+            <div class="preview-node n3"><small>✕ RESULT · BAD</small><strong>Candidate A rejected</strong><span>Unstable binding pose</span></div>
+            <div class="preview-focus">Positive paths only</div>
+          </div>
         </div>
       </section>
 
       <section class="section wrap">
-        <h2>Built for long sessions</h2>
-        <p class="sub">The chart is the memory your transcript isn't.</p>
+        <span class="section-label">One shared picture</span>
+        <h2>Stop reconstructing the work from chat history.</h2>
+        <p class="sub">The chart becomes the durable, visual layer between you and the agent.</p>
         <div class="grid">
           <div class="feature">
-            <span class="ico" aria-hidden="true">🌳</span>
-            <h3>A tree, not a transcript</h3>
-            <p>Goals, questions, experiments and results connect as nodes, so the shape of the work is visible.</p>
+            <span class="ico" aria-hidden="true">01</span>
+            <h3>Understand the path</h3>
+            <p>See what led to each result, or focus the entire tree on successful outcomes with one click.</p>
           </div>
           <div class="feature">
-            <span class="ico" aria-hidden="true">⚡</span>
-            <h3>Updates live</h3>
-            <p>The viewer follows along as your agent works. No refresh, no export step.</p>
+            <span class="ico" aria-hidden="true">02</span>
+            <h3>Direct the next move</h3>
+            <p>Request work from any node. The relevant context returns to the connected agent automatically.</p>
           </div>
           <div class="feature">
-            <span class="ico" aria-hidden="true">📊</span>
-            <h3>Evidence attached</h3>
-            <p>Plots and screenshots hang off the result that produced them, so findings keep their proof.</p>
+            <span class="ico" aria-hidden="true">03</span>
+            <h3>Keep evidence close</h3>
+            <p>Generate lightweight plots from local data and attach figures or video to the result they support.</p>
           </div>
           <div class="feature">
-            <span class="ico" aria-hidden="true">☁️</span>
-            <h3>Yours everywhere</h3>
-            <p>Pair once and your charts sync here, readable from any browser you sign in to.</p>
+            <span class="ico" aria-hidden="true">04</span>
+            <h3>Speak your language</h3>
+            <p>Create node types, content templates and visual rules globally or for a single project.</p>
           </div>
         </div>
       </section>
 
       <section class="section wrap" id="how">
-        <h2>How it works</h2>
-        <p class="sub">Three steps, once.</p>
+        <span class="section-label">From zero to live</span>
+        <h2>Connect once. Keep working normally.</h2>
+        <p class="sub">skym is an MCP server your agent calls as it works.</p>
         <div class="steps">
           <div class="step">
             <div>
@@ -81,6 +93,9 @@ claude mcp add skym-flow -- node "$PWD/dist/index.js"</pre>
             </div>
           </div>
         </div>
+      </section>
+      <section class="cta-band">
+        <div class="wrap"><div><span class="section-label">Ready when you are</span><h2>Give your agent work a visible shape.</h2></div><a class="btn primary lg" href="/dashboard">Open skym →</a></div>
       </section>
     </main>
 

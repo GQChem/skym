@@ -55,6 +55,7 @@ function card(n: LaidOutNode, o: RenderOptions): string {
   // 6–8 CVD band legally.
   const glyph = (o.glyphs ?? STATE_GLYPH)[n.node.state] ?? "•";
   const kind = (o.kindLabels ?? KIND_LABEL)[n.node.kind] ?? n.node.kind;
+  const typeLabel = n.presentation.typeLabel ?? "top";
   const metaBaseline = y + type.metaSize;
   parts.push(
     `<text class="skym-glyph" x="${left}" y="${metaBaseline.toFixed(1)}" fill="${ink.accent}" ` +
@@ -63,8 +64,15 @@ function card(n: LaidOutNode, o: RenderOptions): string {
   parts.push(
     `<text class="skym-meta" x="${(left + type.metaSize + 5).toFixed(1)}" y="${metaBaseline.toFixed(1)}" ` +
       `fill="${palette.inkMuted}" font-size="${type.metaSize}" font-weight="${type.metaWeight}" ` +
-      `letter-spacing="${type.metaTracking}em">${esc(kind.toUpperCase())} · ${esc(n.node.state.toUpperCase())}</text>`,
+      `letter-spacing="${type.metaTracking}em">${typeLabel === "top" ? `${esc(kind.toUpperCase())} · ` : ""}${esc(n.node.state.toUpperCase())}</text>`,
   );
+  if (typeLabel === "left") {
+    parts.push(
+      `<text class="skym-kind-side" x="${(-n.h / 2).toFixed(1)}" y="${(c.stripe + 10).toFixed(1)}" ` +
+        `transform="rotate(-90)" fill="${ink.accent}" font-size="${type.metaSize}" font-weight="${type.metaWeight}" ` +
+        `letter-spacing="${type.metaTracking}em" text-anchor="middle">${esc(kind.toUpperCase())}</text>`,
+    );
+  }
   y += type.metaSize + 7;
 
   for (const line of n.titleLines) {

@@ -1,6 +1,7 @@
 import type { FlowNode, Graph } from "./store.js";
 import type { Theme } from "./theme.js";
 import { KIND_LABEL } from "./theme.js";
+import type { KindPresentation } from "./vocab.js";
 
 export interface Line {
   text: string;
@@ -20,6 +21,7 @@ export interface LaidOutNode {
   /** Reserved figure box in card-local coordinates, when the node has one. */
   figure?: { x: number; y: number; w: number; h: number };
   hiddenBullets: number;
+  presentation: KindPresentation;
 }
 
 export interface LaidOutEdge {
@@ -141,6 +143,7 @@ export function measureNode(
   showFigures: boolean,
   detail: Detail = "full",
   kindLabels: Record<string, string> = KIND_LABEL,
+  kindPresentation: Record<string, KindPresentation> = {},
 ): LaidOutNode {
   const { card, type } = theme;
   const chrome = card.padX * 2 + card.stripe;
@@ -161,7 +164,8 @@ export function measureNode(
   // legibility once the view is zoomed out.
   const bulletLines: Line[] = [];
   let hiddenBullets = 0;
-  if (detail === "full") {
+  const presentation = kindPresentation[node.kind] ?? {};
+  if (detail === "full" && presentation.bullets !== false) {
     for (const bullet of node.bullets) {
       if (bulletLines.length >= MAX_BULLET_LINES) {
         hiddenBullets++;
@@ -177,7 +181,8 @@ export function measureNode(
 
   // Figures survive every detail level: a chart still reads as a shape when its
   // labels do not, and the Figures toggle is how they get hidden on purpose.
-  const wantFigure = showFigures;
+  const wantFigure = presentation.figures === "show" ||
+    (presentation.figures !== "hide" && showFigures);
 
   const metaH = type.metaSize + 7;
   const titleH = titleLines.length * type.titleLeading;
@@ -186,9 +191,11 @@ export function measureNode(
   // Widest real line, so the card can give back space nothing is using. The
   // meta row is included — it is often the widest thing on a short card.
   // Must match the string render.ts draws, or the card is measured wrong.
+  const typeLabel = presentation.typeLabel ?? "top";
   const kindText = (kindLabels[node.kind] ?? node.kind).toUpperCase();
+  const metaText = typeLabel === "top" ? `${kindText} · ${node.state.toUpperCase()}` : node.state.toUpperCase();
   const metaW =
-    type.metaSize + 5 + textWidth(`${kindText} · ${node.state.toUpperCase()}`, type.metaSize, type.metaWeight);
+    type.metaSize + 5 + textWidth(metaText, type.metaSize, type.metaWeight);
   const contentW = Math.max(
     metaW,
     ...titleLines.map((t) => textWidth(t, type.titleSize, type.titleWeight)),
@@ -231,6 +238,7 @@ export function measureNode(
     bulletLines,
     figure,
     hiddenBullets,
+    presentation,
   };
 }
 
@@ -300,8 +308,9 @@ export function layoutGraph(
   showFigures: boolean,
   detail: Detail = "full",
   kindLabels: Record<string, string> = KIND_LABEL,
+  kindPresentation: Record<string, KindPresentation> = {},
 ): LayoutResult {
-  const measured = graph.nodes.map((n) => measureNode(n, theme, showFigures, detail, kindLabels));
+  const measured = graph.nodes.map((n) => measureNode(n, theme, showFigures, detail, kindLabels, kindPresentation));
   const byId = new Map(measured.map((m) => [m.id, m]));
   const vertical = graph.direction === "TD" || graph.direction === "BT";
 
