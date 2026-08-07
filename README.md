@@ -44,6 +44,7 @@ Node bodies are concise bullets. The server rejects prose-shaped bullets, states
 | `flow_state` | Move a node to a new state as work progresses. |
 | `flow_edge` | Link nodes when the relation is not a simple follow-on. |
 | `flow_chart` | Draw a chart from data — no image generation, styled to match the cards. |
+| `flow_data` | Point at CSV/TSV/JSON; skym reads it locally and uploads only a generated SVG. |
 | `flow_figure` | Embed an image on a node, from a path or base64. `replace:` swaps it instead of appending. |
 | `flow_remove` | Delete a node or edge — prefer `abandoned` over deleting. |
 | `flow_show` | Return Mermaid source; `list_charts:true` lists other chats' charts. |
@@ -61,6 +62,18 @@ flow_chart({ node_id: "bench", kind: "bar", unit: "ms", title: "p99 by build",
 ```
 
 Three forms, picked by what the reader has to do: **bar** to compare magnitudes, **line** for change over time, **stat** for a single headline number. `emphasis` marks the one point that matters and lets the rest recede. Charts are stored as ordinary SVG figures, so they zoom, export, and embed in `flow.html` like any other. Use `flow_figure` when the evidence is a real screenshot or an externally produced plot.
+
+For data already on disk, avoid copying it through the model context. `flow_data`
+reads CSV, TSV, or JSON locally, infers columns when possible, reduces large
+series to at most 12 legible marks, and uploads only the generated SVG:
+
+```
+flow_data({ node_id: "bench", path: "results/latency.csv", kind: "line",
+            label_column: "build", value_column: "p99", unit: "ms" })
+```
+
+The source dataset stays local. This keeps token use and hosted data exposure
+small while preserving a visual artifact on the result.
 
 ## Storage
 

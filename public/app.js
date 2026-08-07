@@ -17,6 +17,10 @@ const dot = $("live-dot");
 const lightbox = $("lightbox");
 const lightboxImg = $("lightbox-img");
 const menu = $("node-menu");
+const requestDialog = $("request-dialog");
+const requestForm = $("request-form");
+const requestBody = $("request-body");
+const requestContext = $("request-context");
 
 let state = null;
 let selectedId = null;
@@ -47,6 +51,7 @@ let userMovedView = false;
 let detailLevel = "full";
 /** "auto" follows zoom; the other values pin a level from the toolbar. */
 let detailMode = store.get("detail", "auto");
+let positiveOnly = store.get("positive-only", "0") === "1";
 
 document.documentElement.setAttribute("data-theme", mode);
 
@@ -132,7 +137,7 @@ const draw = () => {
       : "No flowchart yet.";
     return;
   }
-  const graph = state.graph;
+  const graph = positiveOnly ? positiveTree(state.graph) : state.graph;
   $("project").textContent = graph.title || "skym";
   $("rev").textContent = `rev ${graph.revision}`;
 
@@ -141,6 +146,7 @@ const draw = () => {
   if (!has) {
     canvas.innerHTML = "";
     lastLayout = null;
+    empty.querySelector("p").textContent = positiveOnly ? "No positive outcomes yet." : "No flowchart yet.";
     renderDetail();
     renderEvents();
     return;
@@ -165,6 +171,26 @@ const draw = () => {
   renderDetail();
   renderEvents();
   void renderCommands();
+};
+
+/** Keep successful results and every ancestor needed to explain how they were reached. */
+const positiveTree = (graph) => {
+  const keep = new Set(graph.nodes.filter((node) => node.state === "good").map((node) => node.id));
+  let changed = true;
+  while (changed) {
+    changed = false;
+    for (const edge of graph.edges) {
+      if (keep.has(edge.to) && !keep.has(edge.from)) {
+        keep.add(edge.from);
+        changed = true;
+      }
+    }
+  }
+  return {
+    ...graph,
+    nodes: graph.nodes.filter((node) => keep.has(node.id)),
+    edges: graph.edges.filter((edge) => keep.has(edge.from) && keep.has(edge.to)),
+  };
 };
 
 const renderCommands = async () => {
@@ -316,8 +342,37 @@ const MENU_ITEMS = [
   { label: "Copy node", run: (n) => copy(nodeAsText(n)) },
 ];
 
+const composeRequest = (node) => new Promise((resolve) => {
+  requestContext.textContent = `${node.title} (${node.id})`;
+  requestBody.value = "";
+  requestDialog.showModal();
+  requestBody.focus();
+
+  const finish = (value) => {
+    requestForm.removeEventListener("submit", submit);
+    requestDialog.removeEventListener("cancel", cancel);
+    $("request-cancel").removeEventListener("click", cancel);
+    if (requestDialog.open) requestDialog.close();
+    resolve(value);
+  };
+  const submit = (event) => {
+    event.preventDefault();
+    const value = requestBody.value.trim();
+    if (value) finish(value);
+  };
+  const cancel = (event) => {
+    event?.preventDefault();
+    finish(null);
+  };
+  requestForm.addEventListener("submit", submit);
+  requestDialog.addEventListener("cancel", cancel);
+  $("request-cancel").addEventListener("click", cancel);
+});
+
 const requestWork = async (node) => {
   if (!state?.commandsEnabled) return copy(promptFor(node));
+  const instruction = await composeRequest(node);
+  if (!instruction) return false;
   const chartId = state.chartId || chartParam;
   if (!chartId) throw new Error("No hosted chart selected");
   const r = await fetch(`/api/charts/${encodeURIComponent(chartId)}/commands`, {
@@ -326,11 +381,12 @@ const requestWork = async (node) => {
     body: JSON.stringify({
       node_id: node.id,
       verb: "work_on",
-      body: promptFor(node),
+      body: `${instruction}\n\nContext:\n${promptFor(node)}`,
       idempotency_key: crypto.randomUUID(),
     }),
   });
   if (!r.ok) throw new Error(`Could not queue command (${r.status})`);
+  return true;
 };
 
 const promptFor = (n) => {
@@ -371,8 +427,10 @@ const openMenu = (id, x, y) => {
     btn.addEventListener("click", async () => {
       const index = Number(btn.dataset.i);
       try {
-        await MENU_ITEMS[index].run(menuNode);
-        btn.textContent = index === 0 && state.commandsEnabled ? "Queued" : "Copied";
+        const completed = await MENU_ITEMS[index].run(menuNode);
+        btn.textContent = index === 0 && state.commandsEnabled
+          ? (completed === false ? "Cancelled" : "Queued")
+          : "Copied";
       } catch {
         btn.textContent = "Failed";
       }
@@ -490,6 +548,17 @@ figBtn.addEventListener("click", () => {
   showFigures = !showFigures;
   store.set("inline-figs", showFigures ? "1" : "0");
   syncFigBtn();
+  draw();
+});
+
+const positiveBtn = $("positive-only");
+const syncPositiveBtn = () => positiveBtn.classList.toggle("active", positiveOnly);
+positiveBtn.addEventListener("click", () => {
+  positiveOnly = !positiveOnly;
+  store.set("positive-only", positiveOnly ? "1" : "0");
+  syncPositiveBtn();
+  selectedId = null;
+  userMovedView = false;
   draw();
 });
 
@@ -627,6 +696,7 @@ const boot = async () => {
     .catch(() => {});
 
   syncFigBtn();
+  syncPositiveBtn();
   renderLegend();
   refreshCharts();
   setInterval(refreshCharts, 5000);

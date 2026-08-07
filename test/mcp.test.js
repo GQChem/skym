@@ -54,7 +54,7 @@ test("exposes the expected tool surface", async () => {
   try {
     const names = (await s.client.listTools()).tools.map((t) => t.name).sort();
     assert.deepEqual(names, [
-      "flow_action", "flow_chart", "flow_command_state", "flow_edge", "flow_figure", "flow_find", "flow_inbox",
+      "flow_action", "flow_chart", "flow_command_state", "flow_data", "flow_edge", "flow_figure", "flow_find", "flow_inbox",
       "flow_init", "flow_note", "flow_options", "flow_remove", "flow_result",
       "flow_show", "flow_state",
     ]);
@@ -402,6 +402,32 @@ test("flow_chart attaches a data-drawn figure without an image", async () => {
     assert.match(body, /^<svg /);
     assert.ok(body.includes("840ms"));
     assert.ok(body.includes("190ms"));
+  } finally {
+    await s.client.close();
+  }
+});
+
+test("flow_data reads a project CSV and attaches only its rendered SVG", async () => {
+  const s = await boot();
+  try {
+    fs.writeFileSync(path.join(s.projectDir, "measurements.csv"), "build,p99\nbefore,840\nafter,190\n");
+    const call = (name, args) => s.client.callTool({ name, arguments: args });
+    await call("flow_init", { title: "File data" });
+    await call("flow_result", { id: "bench", title: "Benchmark", state: "good" });
+    const result = await call("flow_data", {
+      node_id: "bench",
+      path: "measurements.csv",
+      kind: "bar",
+      label_column: "build",
+      value_column: "p99",
+      unit: "ms",
+    });
+    assert.match(text(result), /Read 2 rows locally; rendered 2 points/);
+    const assets = path.join(s.root, "charts", "file-data", "assets");
+    const generated = fs.readdirSync(assets);
+    assert.equal(generated.length, 1);
+    assert.match(generated[0], /\.svg$/);
+    assert.ok(fs.readFileSync(path.join(assets, generated[0]), "utf8").includes("840ms"));
   } finally {
     await s.client.close();
   }

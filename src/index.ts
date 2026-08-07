@@ -14,6 +14,7 @@ import {
 } from "./store.js";
 import { toMermaid } from "./mermaid.js";
 import { renderChart, validateChart } from "./chart.js";
+import { dataPointsFromFile } from "./data.js";
 import { DEFAULT_THEME, paletteFor } from "./theme.js";
 import { loadConfig } from "./config.js";
 import { allStates, kindDef, openStates, type KindDef } from "./vocab.js";
@@ -644,6 +645,56 @@ server.registerTool(
     store.attachFigure(node_id, Buffer.from(svg, "utf8"), "image/svg+xml", caption, "svg", replace ?? false);
     await ensureViewer();
     return ok(summary(`Chart attached to "${node_id}" (${kind}, ${points.length} points).`));
+  },
+);
+
+server.registerTool(
+  "flow_data",
+  {
+    title: "Visualize a local data file",
+    description:
+      "Point at a CSV, TSV, or JSON file and let skym read it locally and render an SVG. Only the compact generated figure is synchronized; the source dataset is not uploaded or copied into the prompt.",
+    inputSchema: {
+      node_id: z.string().describe("Result node that should carry the generated visualization."),
+      path: z.string().min(1).describe("Data file path, relative to the project or absolute."),
+      kind: z.enum(["bar", "line", "stat"]).describe("bar compares values; line shows ordered change; stat shows the last value."),
+      label_column: z.string().optional().describe("Column used for labels. Inferred when omitted."),
+      value_column: z.string().optional().describe("Numeric column to plot. Inferred when omitted."),
+      max_points: z.number().int().min(2).max(12).optional().describe("Maximum rendered points. Defaults to 12."),
+      title: z.string().optional(),
+      unit: z.string().optional(),
+      caption: z.string().optional(),
+      replace: z.boolean().optional(),
+    },
+  },
+  async ({ node_id, path: source, kind, label_column, value_column, max_points, title, unit, caption, replace }) => {
+    const node = store.findNode(node_id);
+    if (!node) throw new Error(`No node with id "${node_id}".`);
+    const file = path.isAbsolute(source) ? source : path.resolve(projectDir, source);
+    const selected = dataPointsFromFile(file, {
+      kind,
+      labelColumn: label_column,
+      valueColumn: value_column,
+      maxPoints: max_points,
+    });
+    const spec = { kind, points: selected.points, title, unit };
+    const palette = paletteFor(DEFAULT_THEME, "light");
+    const accent = palette.states[node.state]?.accent ?? palette.focus;
+    const box = { width: 320, height: kind === "stat" ? 120 : 170 };
+    const svg = renderChart(spec, box, DEFAULT_THEME, palette, accent);
+    store.attachFigure(
+      node_id,
+      Buffer.from(svg, "utf8"),
+      "image/svg+xml",
+      caption ?? `${selected.valueColumn} by ${selected.labelColumn} from ${path.basename(file)}`,
+      "svg",
+      replace ?? false,
+    );
+    await ensureViewer();
+    return ok(summary(
+      `Data chart attached to "${node_id}" from ${path.basename(file)}.`,
+      `Read ${selected.totalRows} rows locally; rendered ${selected.points.length} points. The source dataset was not uploaded.`,
+    ));
   },
 );
 

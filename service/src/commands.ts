@@ -57,7 +57,8 @@ export async function claimCommand(pool: Pool, chartId: string, agentId: string)
               lease_expires_at = now() + interval '30 minutes', updated_at = now()
          FROM candidate
         WHERE c.id = candidate.id
-       RETURNING ${fields}`,
+       RETURNING c.id, c.chart_id AS "chartId", c.node_id AS "nodeId", c.verb, c.body, c.status,
+                 c.created_at AS "createdAt", c.lease_expires_at AS "leaseExpiresAt"`,
       [chartId, agentId],
     );
     return r.rows[0] ?? null;

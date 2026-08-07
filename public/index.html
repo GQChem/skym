@@ -27,6 +27,7 @@
           <option value="compact">Detail: Titles</option>
         </select>
         <button id="fit" title="Fit to screen">Fit</button>
+        <button id="positive-only" title="Show successful outcomes and the paths that led to them">Positive</button>
         <button id="inline-figs" title="Show figures inline on the chart">Figures</button>
         <button id="theme" title="Toggle light/dark">Theme</button>
         <button id="export" title="Download SVG">SVG</button>
@@ -64,6 +65,19 @@
     </main>
 
     <div id="node-menu" class="node-menu" hidden></div>
+
+    <dialog id="request-dialog" class="request-dialog">
+      <form method="dialog" id="request-form">
+        <h2>Request agent work</h2>
+        <p id="request-context" class="muted"></p>
+        <label for="request-body">What should the agent do?</label>
+        <textarea id="request-body" maxlength="4000" rows="6" required autofocus></textarea>
+        <div class="dialog-actions">
+          <button value="cancel" type="button" id="request-cancel">Cancel</button>
+          <button value="submit" type="submit" class="active">Queue request</button>
+        </div>
+      </form>
+    </dialog>
 
     <div id="lightbox" class="lightbox" hidden>
       <img id="lightbox-img" alt="" />

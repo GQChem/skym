@@ -20,6 +20,9 @@ operable as a service.
    can be exported, and is never silently discarded.
 2. **Evidence over narration.** Findings stay connected to screenshots, plots,
    measurements, and the actions that produced them.
+   Agents should point at source data or files; skym should derive previews and
+   visualizations locally so evidence does not consume model image-generation
+   or dataset-transcription tokens.
 3. **Structure without ceremony.** Agents create the record as they work;
    humans should not have to maintain a diagram manually.
 4. **Readable by humans, actionable by agents.** The hosted chart grows from a
@@ -109,6 +112,21 @@ operable as a service.
 - Add “what changed since my last visit?” and resumable entry points.
 - Provide account export/import and explicit backup controls.
 - Add shareable read-only links with scopes and expiry.
+- Provide outcome views, beginning with a positive-only tree that retains the
+  causal ancestors of successful results while hiding unrelated branches.
+
+### 5a. Artifact pipeline
+
+- Treat images, generated charts, datasets, video, audio, and documents as
+  typed artifacts rather than forcing every attachment into an image shape.
+- Prefer path-based tools: the agent names a local source and skym performs
+  parsing, reduction, rendering, thumbnailing, and upload outside model context.
+- Keep raw source data local by default; upload only a generated preview unless
+  the user or agent explicitly asks to preserve the original artifact.
+- Support CSV/TSV/JSON to SVG first, then video with browser playback, a local
+  poster-frame/metadata extractor, explicit size limits, and no token-heavy
+  frame narration.
+- Record provenance without leaking absolute local paths to hosting.
 
 ### 6. Web-to-agent control loop
 
@@ -118,6 +136,8 @@ operable as a service.
 - Make commands idempotent, auditable, and safe to retry.
 - Let users resume a branch, request investigation, annotate a result, or hand
   work to another connected agent.
+- Let a user write a custom instruction before queuing work from a node; include
+  the node automatically as context rather than making the user repeat it.
 - Show agent presence and command progress without implying execution guarantees
   the system cannot provide.
 
@@ -219,6 +239,10 @@ Completed in the first product-readiness passes:
   Free/Pro entitlement projection (50 MB and 1 GB at launch).
 - Hybrid licensing: MIT local MCP client/viewer and proprietary hosted service.
 - A complete production configuration and release runbook in `DEPLOYMENT.md`.
+- Custom web-to-agent request composition with automatic node context.
+- A positive-only chart view that preserves paths leading to successful results.
+- Local CSV/TSV/JSON visualization through `flow_data`; only the generated SVG
+  is synchronized, establishing the low-token typed-artifact direction.
 
 ## Success criteria
 

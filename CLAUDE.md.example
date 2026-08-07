@@ -20,6 +20,7 @@ Reusing the same title resumes that chart, so if a chat is restarted, call `flow
 - Set a node to `exploring` when you start it and `done`/`abandoned` when it resolves. Update as work happens, not in a batch at the end.
 - Follow every action that produced an outcome with a `flow_result`. The action says what you did; the result says what you learned.
 - **Attach a figure to results whenever anything visual exists** — a plot, screenshot, benchmark chart, diagram. Use `flow_figure`. Results without evidence are weak.
+- When measurements already exist in CSV, TSV, or JSON, use `flow_data` with the file path. Let skym read and render locally instead of copying the dataset into the prompt.
 - Prefer marking a branch `abandoned` over deleting it. A visible dead end tells the reader it was considered; a gap tells them nothing.
 - Use `after:` to chain nodes — it draws the edge for you.
 
