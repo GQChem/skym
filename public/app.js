@@ -54,6 +54,7 @@ let detailLevel = "full";
 /** "auto" follows zoom; the other values pin a level from the toolbar. */
 let detailMode = store.get("detail", "auto");
 let positiveOnly = store.get("positive-only", "0") === "1";
+let workingOnly = store.get("working-only", "0") === "1";
 
 document.documentElement.setAttribute("data-theme", mode);
 
@@ -67,7 +68,17 @@ const assetUrl = (file) =>
 const applyConfig = (config) => {
   if (config?.theme) theme = config.theme;
   if (config?.vocab?.kinds?.length) {
-    serviceVocab = config.vocab;
+    serviceVocab = {
+      ...config.vocab,
+      kinds: config.vocab.kinds.map((kind) => {
+        const fallback = DEFAULT_VOCAB.kinds.find((item) => item.slug === kind.slug);
+        return fallback ? {
+          ...fallback, ...kind,
+          content: { ...fallback.content, ...kind.content },
+          presentation: { ...fallback.presentation, ...kind.presentation },
+        } : kind;
+      }),
+    };
   }
   applyDesignLayers();
 };
@@ -149,7 +160,8 @@ const draw = () => {
       : "No flowchart yet.";
     return;
   }
-  const graph = positiveOnly ? positiveTree(state.graph) : state.graph;
+  let graph = positiveOnly ? positiveTree(state.graph) : state.graph;
+  if (workingOnly) graph = workingTree(graph);
   $("project").textContent = graph.title || "skym";
   $("rev").textContent = `rev ${graph.revision}`;
 
@@ -158,9 +170,12 @@ const draw = () => {
   if (!has) {
     canvas.innerHTML = "";
     lastLayout = null;
-    empty.querySelector("p").textContent = positiveOnly ? "No positive outcomes yet." : "No flowchart yet.";
+    empty.querySelector("p").textContent = workingOnly
+      ? "Nothing is being worked on right now."
+      : (positiveOnly ? "No successful paths yet." : "No flowchart yet.");
     renderDetail();
     renderEvents();
+    maybeOpenFirstChartDesign(graph);
     return;
   }
 
@@ -183,6 +198,7 @@ const draw = () => {
   renderDetail();
   renderEvents();
   void renderCommands();
+  maybeOpenFirstChartDesign(graph);
 };
 
 /** Keep successful results and every ancestor needed to explain how they were reached. */
@@ -203,6 +219,21 @@ const positiveTree = (graph) => {
     nodes: graph.nodes.filter((node) => keep.has(node.id)),
     edges: graph.edges.filter((edge) => keep.has(edge.from) && keep.has(edge.to)),
   };
+};
+
+/** Active work plus its causal ancestors, so a focused view keeps its meaning. */
+const workingTree = (graph) => {
+  const activeNames = new Set(["exploring", "running", "working", "in-progress", "in_progress"]);
+  const keep = new Set(graph.nodes.filter((node) => activeNames.has(node.state)).map((node) => node.id));
+  let changed = true;
+  while (changed) {
+    changed = false;
+    for (const edge of graph.edges) if (keep.has(edge.to) && !keep.has(edge.from)) {
+      keep.add(edge.from);
+      changed = true;
+    }
+  }
+  return { ...graph, nodes: graph.nodes.filter((node) => keep.has(node.id)), edges: graph.edges.filter((edge) => keep.has(edge.from) && keep.has(edge.to)) };
 };
 
 const renderCommands = async () => {
@@ -408,6 +439,18 @@ const designScope = $("design-scope");
 const designKind = $("design-kind");
 let editingSlug = "";
 
+const maybeOpenFirstChartDesign = () => {
+  const graph = state?.graph;
+  if (!graph || graph.revision > 2 || graph.nodes.length > 1 || designDialog.open) return;
+  const key = `design-welcome-${graph.chartId || chartParam || ownChartId || graph.title}`;
+  if (store.get(key, "0") === "1") return;
+  store.set(key, "1");
+  setTimeout(() => {
+    populateKindPicker(editingSlug);
+    if (!designDialog.open) designDialog.showModal();
+  }, 250);
+};
+
 const kindBySlug = (slug) => vocab.kinds.find((k) => k.slug === slug);
 const setField = (id, value) => { $(id).value = value ?? ""; };
 
@@ -427,12 +470,14 @@ const loadKindEditor = () => {
   if (!kind) return;
   setField("kind-label", kind.label);
   setField("kind-label-position", kind.presentation?.typeLabel ?? "top");
+  setField("state-label-position", kind.presentation?.stateLabel ?? "top");
   $("kind-bullets").checked = kind.presentation?.bullets !== false;
   setField("kind-figures", kind.presentation?.figures ?? "inherit");
   setField("kind-template", kind.content?.template);
   setField("kind-title-rule", kind.content?.title);
   setField("kind-bullet-rule", kind.content?.bullets);
   setField("kind-figure-rule", kind.content?.figure);
+  renderDesignPreview();
 };
 
 const editorPatch = () => ({
@@ -440,6 +485,7 @@ const editorPatch = () => ({
   label: $("kind-label").value.trim() || editingSlug,
   presentation: {
     typeLabel: $("kind-label-position").value,
+    stateLabel: $("state-label-position").value,
     bullets: $("kind-bullets").checked,
     figures: $("kind-figures").value,
   },
@@ -450,6 +496,33 @@ const editorPatch = () => ({
     figure: $("kind-figure-rule").value.trim(),
   },
 });
+
+const renderDesignPreview = () => {
+  if (!editingSlug || !$("kind-label")) return;
+  const scoped = designScope.value === "global"
+    ? resolveVocab(serviceVocab, readDesign("global"))
+    : resolveVocab(serviceVocab, readDesign("global"), readDesign("project"));
+  const previewVocab = resolveVocab(scoped, { kinds: [editorPatch()] });
+  const kind = previewVocab.kinds.find((k) => k.slug === editingSlug);
+  if (!kind) return;
+  $("state-guide").innerHTML = kind.states.map((state) =>
+    `<div><b>${escapeHtml(state.glyph)} ${escapeHtml(state.label)}</b><span>${escapeHtml(state.blurb)}</span></div>`
+  ).join("");
+  const previewGraph = {
+    chartId: "preview", title: "Preview", direction: "TD", revision: 1, createdAt: 1, updatedAt: 1,
+    edges: [], events: [], nodes: [{
+      id: "preview-node", title: `${kind.label} example`,
+      kind: kind.slug, state: kind.defaultState, bullets: ["Concrete evidence or property", "One useful trade-off"],
+      figures: [], createdAt: 1, updatedAt: 1,
+    }],
+  };
+  const labels = kindLabels(previewVocab);
+  const layout = layoutGraph(previewGraph, theme, dagre, showFigures, "full", labels, kindPresentations(previewVocab));
+  $("design-preview").innerHTML = renderSvg(layout, {
+    theme, palette: paletteFor(theme, mode), figureSrc: () => "", glyphs: glyphs(previewVocab),
+    kindLabels: labels, pulseStates: pulseStates(previewVocab), interactive: false,
+  });
+};
 
 const saveKindDesign = () => {
   if (!editingSlug) return;
@@ -476,8 +549,8 @@ $("design-close").addEventListener("click", () => designDialog.close());
 designKind.addEventListener("change", loadKindEditor);
 designScope.addEventListener("change", () => populateKindPicker(editingSlug));
 $("design-save").addEventListener("click", saveKindDesign);
-for (const id of ["kind-label", "kind-label-position", "kind-bullets", "kind-figures", "kind-template", "kind-title-rule", "kind-bullet-rule", "kind-figure-rule"]) {
-  $(id).addEventListener("change", saveKindDesign);
+for (const id of ["kind-label", "kind-label-position", "state-label-position", "kind-bullets", "kind-figures", "kind-template", "kind-title-rule", "kind-bullet-rule", "kind-figure-rule"]) {
+  $(id).addEventListener("input", renderDesignPreview);
 }
 $("design-copy").addEventListener("click", async () => {
   saveKindDesign();
@@ -496,7 +569,7 @@ $("design-add").addEventListener("click", () => {
   const created = {
     slug, label: label.trim(), blurb: `A ${label.trim()} node.`,
     states: structuredClone(seed.states), defaultState: seed.defaultState,
-    presentation: { typeLabel: "top", bullets: true, figures: "inherit" },
+    presentation: { typeLabel: "top", stateLabel: "top", bullets: true, figures: "inherit" },
     content: { template: `Use this node for ${label.trim().toLowerCase()} information.` },
   };
   store.set(designKey(scope), JSON.stringify({ ...layer, kinds: [...(layer.kinds ?? []), created] }));
@@ -659,7 +732,7 @@ detailEl.addEventListener("change", () => {
 });
 
 const figBtn = $("inline-figs");
-const syncFigBtn = () => figBtn.classList.toggle("active", showFigures);
+const syncFigBtn = () => { figBtn.checked = showFigures; };
 
 figBtn.addEventListener("click", () => {
   showFigures = !showFigures;
@@ -669,11 +742,21 @@ figBtn.addEventListener("click", () => {
 });
 
 const positiveBtn = $("positive-only");
-const syncPositiveBtn = () => positiveBtn.classList.toggle("active", positiveOnly);
+const syncPositiveBtn = () => { positiveBtn.checked = positiveOnly; };
 positiveBtn.addEventListener("click", () => {
   positiveOnly = !positiveOnly;
   store.set("positive-only", positiveOnly ? "1" : "0");
   syncPositiveBtn();
+  selectedId = null;
+  userMovedView = false;
+  draw();
+});
+
+const workingBtn = $("working-only");
+const syncWorkingBtn = () => { workingBtn.checked = workingOnly; };
+workingBtn.addEventListener("change", () => {
+  workingOnly = workingBtn.checked;
+  store.set("working-only", workingOnly ? "1" : "0");
   selectedId = null;
   userMovedView = false;
   draw();
@@ -684,10 +767,12 @@ $("panel-toggle").addEventListener("click", () => {
   if (!userMovedView) fit();
 });
 
+const syncThemeButton = () => { $("theme").textContent = mode === "dark" ? "Dark" : "Light"; };
 $("theme").addEventListener("click", () => {
   mode = mode === "light" ? "dark" : "light";
   store.set("theme", mode);
   document.documentElement.setAttribute("data-theme", mode);
+  syncThemeButton();
   // Layout is client-side now, so a theme flip is a repaint — no refetch.
   renderLegend();
   draw();
@@ -814,6 +899,8 @@ const boot = async () => {
 
   syncFigBtn();
   syncPositiveBtn();
+  syncWorkingBtn();
+  syncThemeButton();
   renderLegend();
   refreshCharts();
   setInterval(refreshCharts, 5000);

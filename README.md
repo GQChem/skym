@@ -110,11 +110,11 @@ The shipped `.gitignore` commits `graph.json` but ignores `assets/` — charts s
 ## Viewer
 
 - **Chart switcher** (top-left) moves between chats' charts. The live one is marked `● live`; others open read-only.
-- **Figures** toggles embedded images on the cards; off, nodes just note the count. Either way the side panel shows them, and clicking any figure zooms it.
+- **Show** groups the focused views: **Successful paths** keeps good outcomes and their causal ancestors, **Working now** keeps actively exploring nodes and their context, and **Figures** toggles embedded images on cards. Waiting work is deliberately excluded from Working now because it is paused on an external event.
 - **Click a node** for its bullets and figures; **right-click** for its actions (work on it, copy id, copy node).
 - **Scroll** to zoom, **drag** to pan, **Fit** (or `f`) to re-centre. Pan/zoom survives live updates.
 - **Detail** follows the zoom: cards drop their bullets once text stops being legible, so a large chart reads as structure. Cards re-measure at each level, so the whole graph gets tighter rather than just clipping. Pin **Content** or **Titles** from the dropdown to override.
-- **Theme** toggles light/dark and persists — layout runs in the page, so it repaints without a round trip.
+- **Light/Dark** shows the current theme and toggles it; the choice persists and repaints without a round trip.
 - **SVG** exports the chart. **Legend** documents the state vocabulary; **Activity** lists recent revisions.
 
 ## Customising the cards
@@ -177,12 +177,12 @@ Each kind can also control both agent output and card presentation:
       "bullets": "Measurements, properties and trade-offs; one fact per point.",
       "figure": "Whenever possible generate a figure using a restrained indigo and green palette."
     },
-    "presentation": { "typeLabel": "left", "bullets": true, "figures": "show" }
+    "presentation": { "typeLabel": "left", "stateLabel": "left", "bullets": true, "figures": "show" }
   }] }
 }
 ```
 
-`typeLabel` accepts `top`, `left`, or `hidden`; `figures` accepts `inherit`, `show`, or `hide`. Restart the MCP server after changing a config file because node tools and their instructions are generated when the server starts.
+`typeLabel` and `stateLabel` independently accept `top`, `left`, or `hidden`; side labels are drawn inside a wider, high-contrast state rail. `figures` accepts `inherit`, `show`, or `hide`. Restart the MCP server after changing a config file because node tools and their instructions are generated when the server starts.
 
 ## The service
 

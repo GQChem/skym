@@ -126,6 +126,21 @@ button.active {
 
 button.active:hover { color: #fff; filter: brightness(1.1); }
 
+.show-menu { position: relative; }
+.show-menu summary {
+  list-style: none; user-select: none; cursor: pointer; padding: 6px 11px; border: 1px solid var(--border);
+  border-radius: 9px; font-size: 13px; background: transparent;
+}
+.show-menu summary::-webkit-details-marker { display: none; }
+.show-menu summary::after { content: "⌄"; margin-left: 7px; color: var(--muted); }
+.show-menu[open] summary { border-color: var(--accent); color: var(--accent); }
+.show-popover {
+  position: absolute; z-index: 35; top: calc(100% + 8px); right: 0; min-width: 190px; padding: 8px;
+  border: 1px solid var(--border); border-radius: 12px; background: var(--panel); box-shadow: var(--shadow);
+}
+.show-popover label { display: flex; align-items: center; gap: 9px; padding: 8px; border-radius: 8px; white-space: nowrap; cursor: pointer; }
+.show-popover label:hover { background: var(--accent-soft); }.show-popover input { accent-color: var(--accent); }
+
 .width-ctl {
   display: flex;
   align-items: center;
@@ -458,6 +473,11 @@ figcaption {
 .design-dialog textarea { resize: vertical; }
 .design-dialog .check { display: flex; grid-template-columns: auto 1fr; align-items: center; justify-content: start; }
 .design-dialog .check input { accent-color: var(--accent); }
+.design-preview-wrap { margin-top: 16px; padding-top: 14px; border-top: 1px solid var(--border); }
+.design-preview-wrap > span, .state-guide-wrap > span { display: block; margin-bottom: 8px; color: var(--muted); font-size: 11px; font-weight: 700; letter-spacing: .08em; text-transform: uppercase; }
+#design-preview { min-height: 145px; display: grid; place-items: center; overflow: hidden; border: 1px solid var(--border); border-radius: 12px; background-color: var(--bg); background-image: radial-gradient(circle, color-mix(in srgb, var(--muted) 18%, transparent) 1px, transparent 1px); background-size: 18px 18px; }
+#design-preview svg { display: block; max-width: 100%; max-height: 190px; width: auto; height: auto; }
+.state-guide-wrap { margin-top: 14px; }.state-guide-wrap #state-guide { display: grid; gap: 5px; }.state-guide-wrap #state-guide div { display: grid; grid-template-columns: 92px 1fr; gap: 7px; font-size: 11px; }.state-guide-wrap b { color: var(--fg); }.state-guide-wrap span { color: var(--muted); }
 .design-actions { display: flex; align-items: center; justify-content: flex-end; gap: 8px; margin-top: 16px; }
 .design-actions #design-status { margin-right: auto; font-size: 12px; }
 

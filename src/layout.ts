@@ -22,6 +22,7 @@ export interface LaidOutNode {
   figure?: { x: number; y: number; w: number; h: number };
   hiddenBullets: number;
   presentation: KindPresentation;
+  sideRail: number;
 }
 
 export interface LaidOutEdge {
@@ -146,7 +147,9 @@ export function measureNode(
   kindPresentation: Record<string, KindPresentation> = {},
 ): LaidOutNode {
   const { card, type } = theme;
-  const chrome = card.padX * 2 + card.stripe;
+  const presentation = kindPresentation[node.kind] ?? {};
+  const sideRail = presentation.typeLabel === "left" || presentation.stateLabel === "left" ? 30 : card.stripe;
+  const chrome = card.padX * 2 + sideRail;
   const inner = card.width - chrome;
 
   const rawTitle = wrap(node.title, type.titleSize, inner, type.titleWeight);
@@ -164,7 +167,6 @@ export function measureNode(
   // legibility once the view is zoomed out.
   const bulletLines: Line[] = [];
   let hiddenBullets = 0;
-  const presentation = kindPresentation[node.kind] ?? {};
   if (detail === "full" && presentation.bullets !== false) {
     for (const bullet of node.bullets) {
       if (bulletLines.length >= MAX_BULLET_LINES) {
@@ -192,8 +194,11 @@ export function measureNode(
   // meta row is included — it is often the widest thing on a short card.
   // Must match the string render.ts draws, or the card is measured wrong.
   const typeLabel = presentation.typeLabel ?? "top";
+  const stateLabel = presentation.stateLabel ?? "top";
   const kindText = (kindLabels[node.kind] ?? node.kind).toUpperCase();
-  const metaText = typeLabel === "top" ? `${kindText} · ${node.state.toUpperCase()}` : node.state.toUpperCase();
+  const topMeta = [typeLabel === "top" ? kindText : "", stateLabel === "top" ? node.state.toUpperCase() : ""].filter(Boolean);
+  const metaText = topMeta.join(" · ");
+  const sideMeta = [typeLabel === "left" ? kindText : "", stateLabel === "left" ? node.state.toUpperCase() : ""].filter(Boolean).join(" · ");
   const metaW =
     type.metaSize + 5 + textWidth(metaText, type.metaSize, type.metaWeight);
   const contentW = Math.max(
@@ -212,7 +217,7 @@ export function measureNode(
     const w = innerFinal;
     const h = Math.round(w * card.figureRatio);
     figureH = card.gap + h;
-    figure = { x: card.stripe + card.padX, y: 0, w, h };
+    figure = { x: sideRail + card.padX, y: 0, w, h };
   } else if (node.figures.length && detail === "full") {
     // The "N figures" note is itself small print; drop it with the bullets.
     figureH = card.gap + type.metaSize + 4;
@@ -220,6 +225,7 @@ export function measureNode(
 
   const h = Math.max(
     card.minHeight,
+    sideMeta ? textWidth(sideMeta, type.metaSize, 700) + 24 : 0,
     card.padY * 2 + metaH + titleH + bulletsH + figureH,
   );
 
@@ -239,6 +245,7 @@ export function measureNode(
     figure,
     hiddenBullets,
     presentation,
+    sideRail,
   };
 }
 
@@ -365,7 +372,7 @@ export function layoutGraph(
     const a = byId.get(e.from);
     const b = byId.get(e.to);
     if (!a || !b) continue;
-    const points = anchorPoints(a, b, vertical, theme.layout.arrow);
+    const points = anchorPoints(a, b, vertical);
     // The label belongs on the run the elbow actually travels, offset off the
     // stroke so it never sits on top of a neighbouring edge.
     const mid = vertical
@@ -418,7 +425,6 @@ function anchorPoints(
   a: LaidOutNode,
   b: LaidOutNode,
   vertical: boolean,
-  arrow: number,
 ): { x: number; y: number }[] {
   const ac = { x: a.x + a.w / 2, y: a.y + a.h / 2 };
   const bc = { x: b.x + b.w / 2, y: b.y + b.h / 2 };
@@ -430,7 +436,7 @@ function anchorPoints(
     const exitX = ac.x + Math.sign(bc.x - ac.x) * Math.max(0, inset);
     return [
       { x: exitX, y: down ? a.y + a.h : a.y },
-      { x: bc.x, y: down ? b.y - arrow : b.y + b.h + arrow },
+      { x: bc.x, y: down ? b.y : b.y + b.h },
     ];
   }
 
@@ -439,6 +445,6 @@ function anchorPoints(
   const exitY = ac.y + Math.sign(bc.y - ac.y) * Math.max(0, inset);
   return [
     { x: right ? a.x + a.w : a.x, y: exitY },
-    { x: right ? b.x - arrow : b.x + b.w + arrow, y: bc.y },
+    { x: right ? b.x : b.x + b.w, y: bc.y },
   ];
 }

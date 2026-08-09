@@ -82,6 +82,14 @@ test("a kind can override the chart-level figure toggle", () => {
   assert.equal(measureNode(withFigure, DEFAULT_THEME, true, "full", undefined, { action: { figures: "hide" } }).figure, undefined);
 });
 
+test("side labels reserve a real rail instead of overlapping the state stripe", () => {
+  const m = measureNode(node(), DEFAULT_THEME, false, "full", undefined, {
+    action: { typeLabel: "left", stateLabel: "left" },
+  });
+  assert.equal(m.sideRail, 30);
+  assert.ok(m.sideRail > DEFAULT_THEME.card.stripe);
+});
+
 test("bullets past the cap are counted, not rendered", () => {
   const bullets = Array.from({ length: 20 }, (_, i) => `bullet number ${i}`);
   const m = measureNode(node({ bullets }), DEFAULT_THEME, false);
@@ -158,6 +166,15 @@ test("edges produce a drawable path", () => {
   );
   assert.match(out.edges[0].path, /^M[\d.]+,[\d.]+/);
   assert.ok(!out.edges[0].path.includes("NaN"));
+});
+
+test("an arrow path reaches the destination card border", () => {
+  const out = layoutGraph(
+    graph([node({ id: "a" }), node({ id: "b" })], [{ id: "e", from: "a", to: "b", dashed: false }]),
+    DEFAULT_THEME, dagre, false,
+  );
+  const target = out.nodes.find((item) => item.id === "b");
+  assert.ok(out.edges[0].path.endsWith(`${(target.x + target.w / 2).toFixed(1)},${target.y.toFixed(1)}`));
 });
 
 test("an edge to a missing node is dropped, not crashed on", () => {

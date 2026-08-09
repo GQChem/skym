@@ -63,6 +63,7 @@ export interface KindContentTemplate {
 
 export interface KindPresentation {
   typeLabel?: "top" | "left" | "hidden";
+  stateLabel?: "top" | "left" | "hidden";
   bullets?: boolean;
   figures?: "inherit" | "show" | "hide";
 }
@@ -84,6 +85,12 @@ const ACTION: KindDef = {
   blurb:
     "An action is something done or to be done — a step you are taking or considering. Every action that produces an outcome should be followed by a result node.",
   defaultState: "planned",
+  content: {
+    template: "Record one concrete step being considered, attempted, or completed. Keep it distinct from the outcome it produces.",
+    title: "Name the action with a short verb-led phrase.",
+    bullets: "Add only the method, constraints, or implementation details needed to understand the step.",
+    figure: "Actions normally do not need a figure; attach one only when the procedure itself is visual.",
+  },
   states: [
     {
       slug: "planned",
@@ -98,7 +105,7 @@ const ACTION: KindDef = {
       slug: "exploring",
       label: "exploring",
       glyph: "◐",
-      blurb: "actively working on it now",
+      blurb: "the agent is actively doing this work now",
       pulse: true,
       open: true,
       light: { accent: "#2a78d6", fill: "#f2f7fe", border: "#a9cbf2" },
@@ -108,7 +115,7 @@ const ACTION: KindDef = {
       slug: "waiting",
       label: "waiting",
       glyph: "◔",
-      blurb: "blocked on something external, like a monitor or a scheduled wakeup",
+      blurb: "paused until an external event, person, monitor, or scheduled wakeup; no active work is happening",
       pulse: true,
       open: true,
       light: { accent: "#eda100", fill: "#fdf8ec", border: "#e8cf9a" },
@@ -149,6 +156,12 @@ const RESULT: KindDef = {
     "A result records what an action actually produced — findings, measurements, an outcome. Attach a figure whenever anything visual exists: results are the nodes that carry evidence.",
   defaultState: "inconclusive",
   wantsFigure: true,
+  content: {
+    template: "State what the preceding work actually produced. Separate observed evidence from interpretation.",
+    title: "Lead with the key finding or outcome.",
+    bullets: "List measurements, evidence, properties, and trade-offs; keep one fact per point.",
+    figure: "Whenever visual evidence is possible, generate or attach a clear figure with restrained, accessible colours and a useful caption.",
+  },
   states: [
     {
       slug: "good",
@@ -192,6 +205,12 @@ const OPTIONS: KindDef = {
     "A fork with candidate branches. Creates the branch point and one planned action per candidate, so alternatives you did not pursue stay on the chart instead of being forgotten.",
   defaultState: "open",
   fork: true,
+  content: {
+    template: "Describe a genuine decision point and preserve every plausible candidate, including options not chosen.",
+    title: "Name the decision to be made.",
+    bullets: "Summarise the deciding criteria or constraints.",
+    figure: "Use a figure only when it materially clarifies the comparison.",
+  },
   states: [
     {
       slug: "open",
@@ -220,6 +239,12 @@ const NOTE: KindDef = {
     "A constraint, fact, or open question that shapes the work without being a step in it — 'must stay under 200ms', 'the staging DB is a snapshot from March'. Use when something matters but is not an action, result, or fork.",
   defaultState: "active",
   attaches: true,
+  content: {
+    template: "Capture durable context that affects the work but is not itself a step or outcome.",
+    title: "State the constraint, fact, assumption, or open question directly.",
+    bullets: "Add scope, source, or implications only when useful.",
+    figure: "Attach a figure only when the note refers to visual source material.",
+  },
   states: [
     {
       slug: "active",

@@ -68,6 +68,28 @@ test("state colour never carries meaning alone", () => {
   }
 });
 
+test("type and state labels can share a high-contrast side rail", () => {
+  const g = graph([node()]);
+  const layout = layoutGraph(g, DEFAULT_THEME, dagre, false, "full", undefined, {
+    action: { typeLabel: "left", stateLabel: "left" },
+  });
+  const svg = renderSvg(layout, { theme: DEFAULT_THEME, palette: paletteFor(DEFAULT_THEME, "light"), figureSrc: (f) => f });
+  assert.equal((svg.match(/skym-side-label/g) ?? []).length, 1);
+  assert.ok(svg.includes("ACTION"));
+  assert.ok(svg.includes("PLANNED"));
+});
+
+test("a state label can be hidden independently from its glyph", () => {
+  const g = graph([node()]);
+  const layout = layoutGraph(g, DEFAULT_THEME, dagre, false, "full", undefined, {
+    action: { typeLabel: "top", stateLabel: "hidden" },
+  });
+  const svg = renderSvg(layout, { theme: DEFAULT_THEME, palette: paletteFor(DEFAULT_THEME, "light"), figureSrc: (f) => f });
+  assert.ok(svg.includes("ACTION"));
+  assert.ok(svg.includes(STATE_GLYPH.planned));
+  assert.ok(!svg.includes("PLANNED"));
+});
+
 test("titles and bullets reach the output", () => {
   const svg = draw(graph([node({ title: "Swap cache to Redis", bullets: ["TTL 60s"] })]));
   assert.ok(svg.includes("Swap cache to Redis"));

@@ -423,8 +423,8 @@ function registerKindTool(kind: KindDef): void {
       const node = store.findNode(id)!;
       let hint: string | undefined;
       if (kind.wantsFigure && node.figures.length === 0) {
-        hint = kind.content?.figure ??
-          "No figure attached. If this has anything visual — a plot, screenshot, or diagram — attach it with flow_figure.";
+        hint = `No figure attached. ${kind.content?.figure ??
+          "If this has anything visual — a plot, screenshot, or diagram — attach it with flow_figure."}`;
       } else if (state === "done") {
         const resultKind = vocab.kinds.find((k) => k.wantsFigure);
         if (resultKind) hint = `Now record what happened with flow_${resultKind.slug} — that is where the findings and figures live.`;

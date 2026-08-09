@@ -45,10 +45,10 @@ function card(n: LaidOutNode, o: RenderOptions): string {
 
   // The stripe is the state's loudest cue; it is clipped to the card radius.
   parts.push(
-    `<path class="skym-stripe" d="${stripePath(n.h, c.radius, c.stripe)}" fill="${ink.accent}"/>`,
+    `<path class="skym-stripe" d="${stripePath(n.h, c.radius, n.sideRail)}" fill="${ink.accent}"/>`,
   );
 
-  const left = c.stripe + c.padX;
+  const left = n.sideRail + c.padX;
   let y = c.padY;
 
   // Meta row: glyph + kind, the label pairing that lets colour stay in the
@@ -56,21 +56,30 @@ function card(n: LaidOutNode, o: RenderOptions): string {
   const glyph = (o.glyphs ?? STATE_GLYPH)[n.node.state] ?? "•";
   const kind = (o.kindLabels ?? KIND_LABEL)[n.node.kind] ?? n.node.kind;
   const typeLabel = n.presentation.typeLabel ?? "top";
+  const stateLabel = n.presentation.stateLabel ?? "top";
+  const topMeta = [typeLabel === "top" ? kind.toUpperCase() : "", stateLabel === "top" ? n.node.state.toUpperCase() : ""].filter(Boolean);
   const metaBaseline = y + type.metaSize;
-  parts.push(
-    `<text class="skym-glyph" x="${left}" y="${metaBaseline.toFixed(1)}" fill="${ink.accent}" ` +
-      `font-size="${type.metaSize + 1.5}" font-weight="700">${esc(glyph)}</text>`,
-  );
-  parts.push(
+  if (stateLabel !== "left") {
+    parts.push(
+      `<text class="skym-glyph" x="${left}" y="${metaBaseline.toFixed(1)}" fill="${ink.accent}" ` +
+        `font-size="${type.metaSize + 1.5}" font-weight="700">${esc(glyph)}</text>`,
+    );
+  }
+  if (topMeta.length) parts.push(
     `<text class="skym-meta" x="${(left + type.metaSize + 5).toFixed(1)}" y="${metaBaseline.toFixed(1)}" ` +
       `fill="${palette.inkMuted}" font-size="${type.metaSize}" font-weight="${type.metaWeight}" ` +
-      `letter-spacing="${type.metaTracking}em">${typeLabel === "top" ? `${esc(kind.toUpperCase())} · ` : ""}${esc(n.node.state.toUpperCase())}</text>`,
+      `letter-spacing="${type.metaTracking}em">${esc(topMeta.join(" · "))}</text>`,
   );
-  if (typeLabel === "left") {
+  const sideText = contrastText(ink.accent);
+  const sideItems = [
+    typeLabel === "left" ? kind.toUpperCase() : "",
+    stateLabel === "left" ? `${glyph} ${n.node.state.toUpperCase()}` : "",
+  ].filter(Boolean);
+  if (sideItems.length) {
     parts.push(
-      `<text class="skym-kind-side" x="${(-n.h / 2).toFixed(1)}" y="${(c.stripe + 10).toFixed(1)}" ` +
-        `transform="rotate(-90)" fill="${ink.accent}" font-size="${type.metaSize}" font-weight="${type.metaWeight}" ` +
-        `letter-spacing="${type.metaTracking}em" text-anchor="middle">${esc(kind.toUpperCase())}</text>`,
+      `<text class="skym-side-label" x="${(-n.h / 2).toFixed(1)}" y="${(n.sideRail / 2 + 3).toFixed(1)}" ` +
+        `transform="rotate(-90)" fill="${sideText}" font-size="${type.metaSize}" font-weight="700" ` +
+        `letter-spacing="${type.metaTracking}em" text-anchor="middle">${esc(sideItems.join(" · "))}</text>`,
     );
   }
   y += type.metaSize + 7;
@@ -148,6 +157,13 @@ function card(n: LaidOutNode, o: RenderOptions): string {
 }
 
 const cssId = (id: string): string => id.replace(/[^a-zA-Z0-9_-]/g, "_");
+
+function contrastText(hex: string): string {
+  const value = hex.replace("#", "");
+  if (!/^[0-9a-f]{6}$/i.test(value)) return "#ffffff";
+  const [r, g, b] = [0, 2, 4].map((i) => Number.parseInt(value.slice(i, i + 2), 16));
+  return (r * 299 + g * 587 + b * 114) / 1000 > 150 ? "#111827" : "#ffffff";
+}
 
 /** Left stripe following the card's rounded left corners. */
 function stripePath(h: number, r: number, w: number): string {

@@ -27,11 +27,17 @@
           <option value="compact">Detail: Titles</option>
         </select>
         <button id="fit" title="Fit to screen">Fit</button>
-        <button id="positive-only" title="Show successful outcomes and the paths that led to them">Positive</button>
-        <button id="inline-figs" title="Show figures inline on the chart">Figures</button>
+        <details class="show-menu">
+          <summary>Show</summary>
+          <div class="show-popover">
+            <label><input id="positive-only" type="checkbox" /> Successful paths</label>
+            <label><input id="inline-figs" type="checkbox" /> Figures</label>
+            <label><input id="working-only" type="checkbox" /> Working now</label>
+          </div>
+        </details>
         <button id="customize" title="Customize node types and content rules">Design</button>
         <button id="theme" title="Toggle light/dark">Theme</button>
-        <button id="export" title="Download SVG">SVG</button>
+        <button id="export" title="Download SVG"><span aria-hidden="true">⇩</span> SVG</button>
         <button id="panel-toggle" title="Toggle details panel">Details</button>
       </div>
     </header>
@@ -96,9 +102,12 @@
           <fieldset>
             <legend>Identity & layout</legend>
             <label>Name<input id="kind-label" type="text" maxlength="40" /></label>
-            <label>Type label<select id="kind-label-position"><option value="top">Above title</option><option value="left">Left, vertical</option><option value="hidden">Hidden</option></select></label>
+            <label>Type label<select id="kind-label-position"><option value="top">Above title</option><option value="left">Left rail</option><option value="hidden">Hidden</option></select></label>
+            <label>State label<select id="state-label-position"><option value="top">Above title</option><option value="left">Left rail</option><option value="hidden">Hidden</option></select></label>
             <label class="check"><input id="kind-bullets" type="checkbox" /> Show bullet points</label>
             <label>Figures<select id="kind-figures"><option value="inherit">Use chart setting</option><option value="show">Always show</option><option value="hide">Always hide</option></select></label>
+            <div class="design-preview-wrap"><span>Live preview</span><div id="design-preview"></div></div>
+            <div class="state-guide-wrap"><span>State meanings</span><div id="state-guide"></div></div>
           </fieldset>
           <fieldset>
             <legend>Agent content template</legend>

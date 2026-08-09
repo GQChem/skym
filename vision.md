@@ -154,7 +154,7 @@ operable as a service.
 - Treat node types as a user-defined design system, not a fixed four-item taxonomy.
 - Layer global defaults from `~/.skym/config.json` with project overrides from `.skym/config.json`; project values win field by field.
 - Let every type specify an overall content template plus separate title, bullet, and figure instructions. Feed those instructions directly into the generated MCP tool so the agent follows the same contract the viewer communicates.
-- Let every type place its label above the title, vertically on the left, or hide it; independently show or hide bullets and figures.
+- Let every type place both its type and state labels independently above the title, inside a high-contrast side rail, or hide them; independently show or hide bullets and figures.
 - Provide a visual editor with immediate preview, creation of new node types, and export for both scopes. Keep the JSON portable and versionable rather than trapping the design in one hosted account.
 - Keep the legend compact and progressive: show the visual vocabulary first, reveal prose only on demand.
 
