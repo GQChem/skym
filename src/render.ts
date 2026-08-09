@@ -51,6 +51,16 @@ function card(n: LaidOutNode, o: RenderOptions): string {
   const left = n.sideRail + c.padX;
   let y = c.padY;
 
+  if (n.node.badge) {
+    const badgeW = Math.max(24, textWidth(n.node.badge, 10, 700) + 14);
+    parts.push(
+      `<rect class="skym-badge" x="${left}" y="${y}" width="${badgeW.toFixed(1)}" height="20" rx="10" fill="${ink.accent}"/>`,
+      `<text class="skym-badge-text" x="${(left + badgeW / 2).toFixed(1)}" y="${(y + 13.5).toFixed(1)}" ` +
+        `fill="${contrastText(ink.accent)}" font-size="10" font-weight="700" text-anchor="middle">${esc(n.node.badge)}</text>`,
+    );
+    y += n.badgeHeight;
+  }
+
   // Meta row: glyph + kind, the label pairing that lets colour stay in the
   // 6–8 CVD band legally.
   const glyph = (o.glyphs ?? STATE_GLYPH)[n.node.state] ?? "•";
@@ -146,9 +156,18 @@ function card(n: LaidOutNode, o: RenderOptions): string {
     }
   } else if (n.node.figures.length) {
     const label = `${n.node.figures.length} figure${n.node.figures.length > 1 ? "s" : ""}`;
+    const fileOffset = n.node.artifacts?.length ? c.gap + type.metaSize + 4 : 0;
     parts.push(
-      `<text class="skym-figcount" x="${left}" y="${(n.h - c.padY - 1).toFixed(1)}" fill="${palette.inkMuted}" ` +
+      `<text class="skym-figcount" x="${left}" y="${(n.h - c.padY - 1 - fileOffset).toFixed(1)}" fill="${palette.inkMuted}" ` +
         `font-size="${type.metaSize}" font-weight="${type.metaWeight}" letter-spacing="${type.metaTracking}em">▣ ${esc(label.toUpperCase())}</text>`,
+    );
+  }
+
+  if (n.node.artifacts?.length) {
+    const label = `${n.node.artifacts.length} file${n.node.artifacts.length > 1 ? "s" : ""}`;
+    parts.push(
+      `<text class="skym-filecount" x="${left}" y="${(n.h - c.padY - 1).toFixed(1)}" fill="${palette.inkMuted}" ` +
+        `font-size="${type.metaSize}" font-weight="${type.metaWeight}" letter-spacing="${type.metaTracking}em">↧ ${esc(label.toUpperCase())}</text>`,
     );
   }
 

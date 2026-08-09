@@ -1,5 +1,6 @@
 import type {
   Direction,
+  Artifact,
   Figure,
   FlowEdge,
   FlowNode,
@@ -31,13 +32,16 @@ export type Op =
       state?: NodeState;
       bullets?: string[];
       group?: string;
+      badge?: string | null;
     }
   | { t: "node.state"; id: string; state: NodeState }
   | { t: "node.del"; id: string }
   | { t: "edge.put"; id: string; from: string; to: string; label?: string; dashed: boolean }
   | { t: "edge.del"; from: string; to: string }
   | { t: "figure.add"; nodeId: string; figure: Figure }
-  | { t: "figure.clear"; nodeId: string };
+  | { t: "figure.clear"; nodeId: string }
+  | { t: "file.add"; nodeId: string; artifact: Artifact }
+  | { t: "file.clear"; nodeId: string };
 
 export interface Entry {
   /**
@@ -80,6 +84,10 @@ export function describe(op: Op, existed = false): { kind: string; detail: strin
       return { kind: "figure.add", detail: `${op.nodeId}:${op.figure.file}` };
     case "figure.clear":
       return { kind: "figure.clear", detail: op.nodeId };
+    case "file.add":
+      return { kind: "file.add", detail: `${op.nodeId}:${op.artifact.name}` };
+    case "file.clear":
+      return { kind: "file.clear", detail: op.nodeId };
   }
 }
 
@@ -138,6 +146,9 @@ export function apply(graph: Graph, entry: Entry): Graph {
         if (op.state !== undefined) existing.state = op.state;
         if (op.bullets !== undefined) existing.bullets = op.bullets;
         if (op.group !== undefined) existing.group = op.group;
+        if (op.badge === null) delete existing.badge;
+        else if (op.badge !== undefined) existing.badge = op.badge;
+        existing.artifacts ??= [];
         existing.updatedAt = at;
       } else {
         const kind = op.kind ?? "action";
@@ -149,6 +160,8 @@ export function apply(graph: Graph, entry: Entry): Graph {
           bullets: op.bullets ?? [],
           group: op.group,
           figures: [],
+          artifacts: [],
+          badge: op.badge ?? undefined,
           createdAt: at,
           updatedAt: at,
         });
@@ -192,6 +205,23 @@ export function apply(graph: Graph, entry: Entry): Graph {
       const node = graph.nodes.find((n) => n.id === op.nodeId);
       if (node) {
         node.figures = [];
+        node.updatedAt = at;
+      }
+      break;
+    }
+    case "file.add": {
+      const node = graph.nodes.find((n) => n.id === op.nodeId);
+      if (node) {
+        node.artifacts ??= [];
+        node.artifacts.push(op.artifact);
+        node.updatedAt = at;
+      }
+      break;
+    }
+    case "file.clear": {
+      const node = graph.nodes.find((n) => n.id === op.nodeId);
+      if (node) {
+        node.artifacts = [];
         node.updatedAt = at;
       }
       break;
@@ -274,10 +304,11 @@ export function migrateGraphToLog(graph: Graph): Entry[] {
   push({ t: "init", title: graph.title, description: graph.description, direction: graph.direction });
   for (const n of graph.nodes) {
     push(
-      { t: "node.put", id: n.id, title: n.title, kind: n.kind, state: n.state, bullets: n.bullets, group: n.group },
+      { t: "node.put", id: n.id, title: n.title, kind: n.kind, state: n.state, bullets: n.bullets, group: n.group, badge: n.badge },
       n.createdAt || at,
     );
     for (const f of n.figures) push({ t: "figure.add", nodeId: n.id, figure: f }, n.updatedAt || at);
+    for (const artifact of n.artifacts ?? []) push({ t: "file.add", nodeId: n.id, artifact }, n.updatedAt || at);
   }
   for (const e of graph.edges) {
     push({ t: "edge.put", id: e.id, from: e.from, to: e.to, label: e.label, dashed: e.dashed }, at);

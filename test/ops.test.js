@@ -53,6 +53,17 @@ test("an op naming a missing node is skipped, not fatal", () => {
   assert.equal(g.revision, 4);
 });
 
+test("badge and generic files survive operation replay", () => {
+  const artifact = { id: "src", file: "n-1-run.py", name: "run.py", mime: "text/x-python", bytes: 42 };
+  const g = replay([
+    entry(1, { t: "init", title: "T", direction: "TD" }),
+    entry(2, { t: "node.put", id: "a", badge: "27 / 600" }),
+    entry(3, { t: "file.add", nodeId: "a", artifact }),
+  ]);
+  assert.equal(g.nodes[0].badge, "27 / 600");
+  assert.deepEqual(g.nodes[0].artifacts, [artifact]);
+});
+
 test("deleting a node drops its edges through the log too", () => {
   const g = replay([
     entry(1, { t: "init", title: "T", direction: "TD" }),

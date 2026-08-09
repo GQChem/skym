@@ -313,6 +313,7 @@ const renderDetail = () => {
     `<div class="chips">` +
       `<span class="chip state-${escapeHtml(node.state)}" style="color:${stateInk.accent}">${escapeHtml(node.state)}</span>` +
       `<span class="chip">${escapeHtml(vocabLabels[node.kind] ?? node.kind)}</span>` +
+      (node.badge ? `<span class="chip badge-chip">${escapeHtml(node.badge)}</span>` : "") +
       (node.group ? `<span class="chip">${escapeHtml(node.group)}</span>` : "") +
       `</div>`,
   ];
@@ -584,6 +585,14 @@ $("design-remove").addEventListener("click", () => {
     $("design-status").textContent = "A chart must keep at least one node type.";
     return;
   }
+  if (node.artifacts?.length) {
+    parts.push(`<div class="artifact-list"><h3>Files</h3>${node.artifacts.map((artifact) =>
+      `<a class="artifact" href="${escapeHtml(assetUrl(artifact.file))}" download="${escapeHtml(artifact.name)}">` +
+      `<span class="artifact-icon">↧</span><span><b>${escapeHtml(artifact.name)}</b>` +
+      (artifact.label ? `<small>${escapeHtml(artifact.label)}</small>` : `<small>${formatBytes(artifact.bytes)} · ${escapeHtml(artifact.mime)}</small>`) +
+      `</span></a>`
+    ).join("")}</div>`);
+  }
   if (!confirm(`Remove the “${kind.label}” node type from ${designScope.value === "global" ? "all projects" : "this project"}? Existing nodes are not deleted.`)) return;
   const scope = designScope.value;
   const layer = readDesign(scope);
@@ -604,8 +613,12 @@ const promptFor = (n) => {
   return lines.join("\n");
 };
 
+const formatBytes = (bytes) => bytes < 1024 ? `${bytes} B` : bytes < 1024 * 1024
+  ? `${(bytes / 1024).toFixed(1)} KB` : `${(bytes / 1024 / 1024).toFixed(1)} MB`;
+
 const nodeAsText = (n) =>
-  [`${n.title} [${n.kind}/${n.state}]`, ...(n.bullets ?? []).map((b) => `- ${b}`)].join("\n");
+  [`${n.title} [${n.kind}/${n.state}]${n.badge ? ` · ${n.badge}` : ""}`, ...(n.bullets ?? []).map((b) => `- ${b}`),
+    ...(n.artifacts ?? []).map((a) => `file: ${a.name}`)].join("\n");
 
 const copy = async (text) => {
   try {

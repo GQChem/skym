@@ -23,6 +23,16 @@ const MIME_EXT: Record<string, string> = {
   "image/gif": ".gif",
   "image/webp": ".webp",
   "image/svg+xml": ".svg",
+  "text/plain": ".txt",
+  "text/x-python": ".py",
+  "text/javascript": ".js",
+  "text/markdown": ".md",
+  "text/csv": ".csv",
+  "text/tab-separated-values": ".tsv",
+  "application/json": ".json",
+  "application/pdf": ".pdf",
+  "application/zip": ".zip",
+  "application/octet-stream": ".bin",
 };
 
 export const isAllowedMime = (mime: string): boolean => mime in MIME_EXT;

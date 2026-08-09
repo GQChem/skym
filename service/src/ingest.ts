@@ -116,6 +116,9 @@ function validate(graph: Graph, entry: Entry): void {
   switch (op.t) {
     case "node.put": {
       checkBullets(op.bullets);
+      if (op.badge !== undefined && op.badge !== null && (typeof op.badge !== "string" || op.badge.length > 24)) {
+        throw new ValidationError("node badge must be at most 24 characters");
+      }
       checkNodeCeiling(graph, !graph.nodes.some((n) => n.id === op.id));
       break;
     }
@@ -126,6 +129,17 @@ function validate(graph: Graph, entry: Entry): void {
     case "node.state": {
       if (!graph.nodes.some((n) => n.id === op.id)) {
         throw new ValidationError(`no node "${op.id}" to set state on`);
+      }
+      break;
+    }
+    case "file.add": {
+      if (!graph.nodes.some((n) => n.id === op.nodeId)) throw new ValidationError(`no node "${op.nodeId}" for file`);
+      const a = op.artifact;
+      if (!a || !a.id || !a.file || !a.name || !a.mime || !Number.isFinite(a.bytes) || a.bytes < 0) {
+        throw new ValidationError("invalid file metadata");
+      }
+      if (a.file !== a.file.split(/[/\\]/).pop() || a.file.length > 240 || a.name.length > 240) {
+        throw new ValidationError("invalid file name");
       }
       break;
     }

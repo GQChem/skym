@@ -32,6 +32,17 @@ export interface Figure {
   mime: string;
 }
 
+export interface Artifact {
+  id: string;
+  /** Internal collision-safe filename in the chart assets directory. */
+  file: string;
+  /** Original user-facing filename. */
+  name: string;
+  mime: string;
+  bytes: number;
+  label?: string;
+}
+
 export interface FlowNode {
   id: string;
   title: string;
@@ -41,6 +52,9 @@ export interface FlowNode {
   bullets: string[];
   group?: string;
   figures: Figure[];
+  artifacts: Artifact[];
+  /** Compact cardinality, progress, or identifier marker shown on the card. */
+  badge?: string;
   createdAt: number;
   updatedAt: number;
 }
@@ -142,6 +156,7 @@ export function readChartAt(chartDir: string): Graph | null {
   if (!graph) return null;
   graph.events ??= [];
   graph.revision ??= 0;
+  for (const node of graph.nodes) node.artifacts ??= [];
   return graph;
 }
 
@@ -614,6 +629,7 @@ export class GraphStore {
     state?: NodeState;
     bullets?: string[];
     group?: string;
+    badge?: string | null;
   }): Graph {
     // Only a new node counts against the ceiling; updates are always allowed,
     // or a full chart could not be corrected.
@@ -665,5 +681,23 @@ export class GraphStore {
       this.commit({ t: "figure.clear", nodeId });
     }
     return this.commit({ t: "figure.add", nodeId, figure: { id: randomUUID(), file, caption, mime } });
+  }
+
+  attachArtifact(nodeId: string, source: string, mime: string, label?: string): Graph {
+    const node = this.findNode(nodeId);
+    if (!node) throw new Error(`No node with id "${nodeId}".`);
+    const stat = fs.statSync(source);
+    if (!stat.isFile()) throw new Error(`Not a file: ${source}`);
+    if (stat.size > 8 * 1024 * 1024) throw new Error("File exceeds the 8 MB per-file limit.");
+    const original = path.basename(source);
+    const safe = original.replace(/[^a-zA-Z0-9._-]/g, "_") || "artifact";
+    const file = `${nodeId.replace(/[^a-zA-Z0-9_-]/g, "_")}-${Date.now()}-${safe}`;
+    fs.mkdirSync(this.assetsDir, { recursive: true });
+    fs.copyFileSync(source, path.join(this.assetsDir, file));
+    return this.commit({
+      t: "file.add",
+      nodeId,
+      artifact: { id: randomUUID(), file, name: original, mime, bytes: stat.size, label },
+    });
   }
 }

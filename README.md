@@ -46,6 +46,7 @@ Node bodies are concise bullets. The server rejects prose-shaped bullets, states
 | `flow_chart` | Draw a chart from data — no image generation, styled to match the cards. |
 | `flow_data` | Point at CSV/TSV/JSON; skym reads it locally and uploads only a generated SVG. |
 | `flow_figure` | Embed an image on a node, from a path or base64. `replace:` swaps it instead of appending. |
+| `flow_file` | Attach a local source file, config, report, PDF, or archive without sending its contents through model context. |
 | `flow_remove` | Delete a node or edge — prefer `abandoned` over deleting. |
 | `flow_show` | Return Mermaid source; `list_charts:true` lists other chats' charts. |
 | `flow_inbox` | Claim work requested from the hosted chart. |
@@ -74,6 +75,27 @@ flow_data({ node_id: "bench", path: "results/latency.csv", kind: "line",
 
 The source dataset stays local. This keeps token use and hosted data exposure
 small while preserving a visual artifact on the result.
+
+## Files and search-space badges
+
+Attach the exact implementation or configuration behind an attempt without pasting it into the prompt:
+
+```
+flow_file({ node_id: "screen-27", path: "experiments/candidate_27.py",
+            label: "constrained minimisation attempt" })
+```
+
+Files are copied into the chart assets, synchronized under the account's normal storage quota, and shown as safe downloads in the node detail panel. Each file is limited to 8 MB. HTML is not accepted, and non-image artifacts are always served as downloads rather than executed in the browser.
+
+Every generated node tool also accepts `badge`. Use it for a search-space cardinality, funnel progress, or terminal identifier:
+
+```
+flow_action({ id: "initial-screen", title: "Screen all designs", badge: "10,000" })
+flow_result({ id: "filtered", title: "Pass structural filters", badge: "27 / 600" })
+flow_result({ id: "winner", title: "Selected design", badge: "design_0042" })
+```
+
+The badge appears as a compact high-contrast capsule at the upper-left of the card. Pass `badge: null` when updating a node to remove it.
 
 ## Storage
 
@@ -111,7 +133,7 @@ The shipped `.gitignore` commits `graph.json` but ignores `assets/` — charts s
 
 - **Chart switcher** (top-left) moves between chats' charts. The live one is marked `● live`; others open read-only.
 - **Show** groups the focused views: **Successful paths** keeps good outcomes and their causal ancestors, **Working now** keeps actively exploring nodes and their context, and **Figures** toggles embedded images on cards. Waiting work is deliberately excluded from Working now because it is paused on an external event.
-- **Click a node** for its bullets and figures; **right-click** for its actions (work on it, copy id, copy node).
+- **Click a node** for its bullets, figures, and downloadable files; **right-click** for its actions (work on it, copy id, copy node).
 - **Scroll** to zoom, **drag** to pan, **Fit** (or `f`) to re-centre. Pan/zoom survives live updates.
 - **Detail** follows the zoom: cards drop their bullets once text stops being legible, so a large chart reads as structure. Cards re-measure at each level, so the whole graph gets tighter rather than just clipping. Pin **Content** or **Titles** from the dropdown to override.
 - **Light/Dark** shows the current theme and toggles it; the choice persists and repaints without a round trip.

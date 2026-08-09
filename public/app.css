@@ -334,6 +334,11 @@ code {
   border: 1px solid var(--border);
   border-radius: 999px;
 }
+.badge-chip { font-weight: 700; color: var(--fg); }
+.artifact-list { margin-top: 16px; }.artifact-list h3 { margin: 0 0 7px; font-size: 11px; color: var(--muted); letter-spacing: .09em; text-transform: uppercase; }
+.artifact { display: flex; align-items: center; gap: 10px; margin: 6px 0; padding: 9px; border: 1px solid var(--border); border-radius: 9px; color: var(--fg); text-decoration: none; }
+.artifact:hover { border-color: var(--accent); background: var(--accent-soft); }.artifact-icon { width: 28px; height: 28px; display: grid; place-items: center; border-radius: 8px; background: var(--accent-soft); color: var(--accent); font-weight: 800; }
+.artifact span:last-child { min-width: 0; display: grid; }.artifact b { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 12.5px; }.artifact small { color: var(--muted); font-size: 11px; overflow-wrap: anywhere; }
 
 /* A miniature of a real card: fill, border, stripe, and glyph. */
 .leg-chip {

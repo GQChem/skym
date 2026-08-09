@@ -127,6 +127,12 @@ operable as a service.
   poster-frame/metadata extractor, explicit size limits, and no token-heavy
   frame narration.
 - Record provenance without leaking absolute local paths to hosting.
+- Let nodes carry safe downloadable source files, configurations, reports, and
+  archives so an attempted implementation remains reproducible without entering
+  model context.
+- Let nodes expose a compact search-space marker (cardinality, funnel fraction,
+  or final entity id) so workflows from thousands of designs to one selection
+  remain visually legible at a glance.
 
 ### 6. Web-to-agent control loop
 

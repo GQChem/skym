@@ -24,6 +24,7 @@ export interface LaidOutNode {
   presentation: KindPresentation;
   sideRail: number;
   metaHeight: number;
+  badgeHeight: number;
 }
 
 export interface LaidOutEdge {
@@ -197,12 +198,15 @@ export function measureNode(
   const metaText = topMeta.join(" · ");
   const sideMeta = [typeLabel === "left" ? kindText : "", stateLabel === "left" ? node.state.toUpperCase() : ""].filter(Boolean).join(" · ");
   const metaH = topMeta.length ? type.metaSize + 7 : 0;
+  const badgeH = node.badge ? 25 : 0;
   const titleH = titleLines.length * type.titleLeading;
   const bulletsH = bulletLines.length ? card.gap + bulletLines.length * type.bulletLeading : 0;
+  const artifactH = node.artifacts?.length ? card.gap + type.metaSize + 4 : 0;
   const metaW =
     type.metaSize + 5 + textWidth(metaText, type.metaSize, type.metaWeight);
   const contentW = Math.max(
     metaW,
+    node.badge ? textWidth(node.badge, 10, 700) + 18 : 0,
     ...titleLines.map((t) => textWidth(t, type.titleSize, type.titleWeight)),
     ...bulletLines.map((b) => MARKER_INDENT + textWidth(b.text, type.bulletSize)),
     // A figure is laid out against the ceiling, so it pins the card open.
@@ -227,11 +231,11 @@ export function measureNode(
   const h = Math.max(
     compactMinHeight,
     sideMeta ? textWidth(sideMeta, type.metaSize, 700) + 24 : 0,
-    card.padY * 2 + metaH + titleH + bulletsH + figureH,
+    card.padY * 2 + badgeH + metaH + titleH + bulletsH + figureH + artifactH,
   );
 
   if (figure) {
-    figure.y = card.padY + metaH + titleH + bulletsH + card.gap;
+    figure.y = card.padY + badgeH + metaH + titleH + bulletsH + card.gap;
   }
 
   return {
@@ -248,6 +252,7 @@ export function measureNode(
     presentation,
     sideRail,
     metaHeight: metaH,
+    badgeHeight: badgeH,
   };
 }
 

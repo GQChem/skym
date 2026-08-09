@@ -160,6 +160,13 @@ async function ensureSync(): Promise<string | null> {
         mime: figure.mime ?? "image/png",
       });
     }
+    for (const artifact of node.artifacts ?? []) {
+      client.enqueueFigure({
+        file: artifact.file,
+        path: path.join(store.assetsDir, artifact.file),
+        mime: artifact.mime,
+      });
+    }
   }
 
   // Ops are queued as they commit; the client drains on its own timer.
@@ -176,8 +183,9 @@ async function ensureSync(): Promise<string | null> {
  * separately or the hosted viewer renders a broken image.
  */
 function queueFigure(client: SyncClient, entry: Entry): void {
-  if (entry.op.t !== "figure.add") return;
-  const { file, mime } = entry.op.figure;
+  if (entry.op.t !== "figure.add" && entry.op.t !== "file.add") return;
+  const item = entry.op.t === "figure.add" ? entry.op.figure : entry.op.artifact;
+  const { file, mime } = item;
   client.enqueueFigure({
     file,
     path: path.join(store.assetsDir, file),
@@ -335,6 +343,9 @@ function registerKindTool(kind: KindDef): void {
     bullets: bulletsSchema.optional().describe(kind.content?.bullets ?? "Concise supporting points."),
     state: z.enum(states).optional().describe(stateProse(kind)),
     group: z.string().optional().describe("Optional lane, e.g. 'Caching' — clusters related branches."),
+    badge: z.string().max(24).nullable().optional().describe(
+      "Compact marker at the card's top-left: a count ('10,000'), reduction ('27 / 600'), or final id. Null clears it.",
+    ),
   };
 
   const shape: Record<string, z.ZodTypeAny> = { ...common };
@@ -368,12 +379,13 @@ function registerKindTool(kind: KindDef): void {
       inputSchema: shape,
     },
     async (args: Record<string, unknown>) => {
-      const { id, title, bullets, state, group, after, edge_label, about } = args as {
+      const { id, title, bullets, state, group, badge, after, edge_label, about } = args as {
         id: string;
         title?: string;
         bullets?: string[];
         state?: string;
         group?: string;
+        badge?: string | null;
         after?: string;
         edge_label?: string;
         about?: string;
@@ -381,7 +393,7 @@ function registerKindTool(kind: KindDef): void {
       validateBullets(bullets);
       // A new node takes the kind's default; an update with no state keeps its own.
       const resolved = assertState(kind.slug, state) ?? (store.findNode(id) ? undefined : kind.defaultState);
-      store.upsertNode({ id, title, kind: kind.slug, state: resolved, bullets, group });
+      store.upsertNode({ id, title, kind: kind.slug, state: resolved, bullets, group, badge });
       if (after) {
         if (!store.findNode(after)) throw new Error(`Cannot link from unknown node "${after}".`);
         store.addEdge(after, id, edge_label, false);
@@ -488,6 +500,16 @@ const EXT_MIME: Record<string, string> = {
   gif: "image/gif",
   svg: "image/svg+xml",
   webp: "image/webp",
+  py: "text/x-python",
+  js: "text/javascript",
+  ts: "text/plain",
+  json: "application/json",
+  csv: "text/csv",
+  tsv: "text/tab-separated-values",
+  txt: "text/plain",
+  md: "text/markdown",
+  pdf: "application/pdf",
+  zip: "application/zip",
 };
 
 server.registerTool(
@@ -536,6 +558,30 @@ server.registerTool(
           : `Figure attached to "${node_id}".`,
       ),
     );
+  },
+);
+
+server.registerTool(
+  "flow_file",
+  {
+    title: "Attach a file to a node",
+    description:
+      "Attach a local source file, configuration, report, archive, or other reproducibility artifact. Skym copies and syncs the bytes without putting file contents in model context.",
+    inputSchema: {
+      node_id: z.string().describe("Existing node that this file documents."),
+      path: z.string().describe("Local file path; relative paths resolve against the project directory."),
+      label: z.string().max(120).optional().describe("Short explanation of what this file represents."),
+      mime: z.string().optional().describe("Override MIME type when the extension is ambiguous."),
+    },
+  },
+  async ({ node_id, path: filePath, label, mime }) => {
+    const abs = path.isAbsolute(filePath) ? filePath : path.resolve(projectDir, filePath);
+    if (!fs.existsSync(abs)) throw new Error(`No such file: ${abs}`);
+    const ext = path.extname(abs).slice(1).toLowerCase();
+    const type = mime ?? EXT_MIME[ext] ?? "application/octet-stream";
+    store.attachArtifact(node_id, abs, type, label);
+    await ensureViewer();
+    return ok(summary(`File "${path.basename(abs)}" attached to "${node_id}".`));
   },
 );
 
@@ -590,7 +636,9 @@ server.registerTool(
       const edges = g.edges.filter((e) => e.to === n.id).map((e) => e.from);
       const after = edges.length ? ` ← ${edges.join(", ")}` : "";
       const figures = n.figures.length ? ` [${n.figures.length} fig]` : "";
-      return `  ${n.id}  (${n.kind}/${n.state})${figures}  ${n.title}${after}`;
+      const files = n.artifacts?.length ? ` [${n.artifacts.length} file]` : "";
+      const badge = n.badge ? ` [${n.badge}]` : "";
+      return `  ${n.id}  (${n.kind}/${n.state})${badge}${figures}${files}  ${n.title}${after}`;
     });
     const more = hits.length > shown.length ? `\n  … ${hits.length - shown.length} more` : "";
     return ok(summary(`${hits.length} match${hits.length === 1 ? "" : "es"}:\n${lines.join("\n")}${more}`));

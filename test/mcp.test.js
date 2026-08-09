@@ -54,7 +54,7 @@ test("exposes the expected tool surface", async () => {
   try {
     const names = (await s.client.listTools()).tools.map((t) => t.name).sort();
     assert.deepEqual(names, [
-      "flow_action", "flow_chart", "flow_command_state", "flow_data", "flow_edge", "flow_figure", "flow_find", "flow_inbox",
+      "flow_action", "flow_chart", "flow_command_state", "flow_data", "flow_edge", "flow_figure", "flow_file", "flow_find", "flow_inbox",
       "flow_init", "flow_note", "flow_options", "flow_remove", "flow_result",
       "flow_show", "flow_state",
     ]);
@@ -243,6 +243,27 @@ test("attaching a figure clears the nudge and stores the file", async () => {
     const files = fs.readdirSync(assets);
     assert.equal(files.length, 1);
     assert.ok(files[0].endsWith(".png"));
+  } finally {
+    await s.client.close();
+  }
+});
+
+test("attaches a generic file without putting its contents in tool arguments", async () => {
+  const s = await boot();
+  try {
+    const source = path.join(s.projectDir, "attempt.py");
+    fs.writeFileSync(source, "print('candidate 27')\n", "utf8");
+    await s.client.callTool({ name: "flow_init", arguments: { title: "Artifacts" } });
+    await s.client.callTool({ name: "flow_action", arguments: { id: "try-27", badge: "27 / 600" } });
+    const result = await s.client.callTool({ name: "flow_file", arguments: {
+      node_id: "try-27", path: "attempt.py", label: "candidate implementation",
+    } });
+    assert.match(text(result), /attempt.py/);
+    const graph = JSON.parse(fs.readFileSync(path.join(s.root, "charts", "artifacts", "graph.json"), "utf8")).graph;
+    assert.equal(graph.nodes[0].badge, "27 / 600");
+    assert.equal(graph.nodes[0].artifacts[0].name, "attempt.py");
+    assert.equal(graph.nodes[0].artifacts[0].mime, "text/x-python");
+    assert.equal(fs.readFileSync(path.join(s.root, "charts", "artifacts", "assets", graph.nodes[0].artifacts[0].file), "utf8"), "print('candidate 27')\n");
   } finally {
     await s.client.close();
   }

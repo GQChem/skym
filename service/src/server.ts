@@ -496,6 +496,7 @@ async function route({ pool, req, res, url }: Ctx): Promise<void> {
 
     const blob = await findFigure(pool, chartId, file);
     if (!blob) return json(res, 404, { error: "not found" });
+    const inline = blob.mime.startsWith("image/");
     res.writeHead(200, {
       "Content-Type": blob.mime,
       // Figure filenames carry a timestamp, so a given name is immutable.
@@ -504,7 +505,7 @@ async function route({ pool, req, res, url }: Ctx): Promise<void> {
       // scripts on this origin. Figures are pixels here, never code.
       "Content-Security-Policy": "default-src 'none'; style-src 'unsafe-inline'; sandbox",
       "X-Content-Type-Options": "nosniff",
-      "Content-Disposition": `inline; filename="${path.basename(blob.path).replace(/[^\w.-]/g, "_")}"`,
+      "Content-Disposition": `${inline ? "inline" : "attachment"}; filename="${path.basename(blob.path).replace(/[^\w.-]/g, "_")}"`,
     });
     fs.createReadStream(blob.path).pipe(res);
     return;

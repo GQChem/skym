@@ -60,6 +60,8 @@ export function offlineHtml(graph: Graph, assetsDir: string, theme: Theme = DEFA
       bullets: n.bullets,
       group: n.group,
       figures: n.figures.map((f) => ({ src: figures[f.file] ?? "", caption: f.caption })),
+      artifacts: (n.artifacts ?? []).map((a) => ({ ...a, src: `assets/${encodeURIComponent(a.file)}` })),
+      badge: n.badge,
     })),
   );
 
@@ -85,6 +87,7 @@ aside h2{font-size:11px;letter-spacing:.09em;text-transform:uppercase;color:var(
 ul{margin:10px 0;padding-left:18px}li{margin:3px 0;overflow-wrap:anywhere}
 figure{margin:12px 0}figure img{width:100%;border-radius:8px;border:1px solid var(--border);cursor:zoom-in;display:block}
 figcaption{color:var(--muted);font-size:12px;margin-top:5px}
+.files{display:grid;gap:6px;margin-top:14px}.file{padding:8px 10px;border:1px solid var(--border);border-radius:8px;color:var(--fg);text-decoration:none}.file small{display:block;color:var(--muted)}
 .lightbox{position:fixed;inset:0;background:rgba(0,0,0,.85);display:flex;align-items:center;justify-content:center;padding:40px;z-index:50;cursor:zoom-out}
 .lightbox img{max-width:100%;max-height:100%;border-radius:10px}[hidden]{display:none!important}
 @media(max-width:820px){main{grid-template-columns:1fr;grid-template-rows:minmax(55%,1fr) auto}aside{border-left:0;border-top:1px solid var(--border);max-height:42vh}}
@@ -111,9 +114,10 @@ const fit=()=>{const svg=chart.querySelector("svg");if(!svg)return;
 const w=+svg.getAttribute("width"),h=+svg.getAttribute("height");if(!w||!h)return;
 view.k=Math.max(.05,Math.min((stage.clientWidth-56)/w,(stage.clientHeight-56)/h,1.4));
 view.x=(stage.clientWidth-w*view.k)/2;view.y=(stage.clientHeight-h*view.k)/2;apply();};
-function show(n){let h='<div class="detail-title">'+esc(n.title)+'</div><div class="chips"><span class="chip">'+esc(n.state)+'</span><span class="chip">'+esc(n.kind)+'</span>'+(n.group?'<span class="chip">'+esc(n.group)+'</span>':'')+'</div>';
+function show(n){let h='<div class="detail-title">'+esc(n.title)+'</div><div class="chips"><span class="chip">'+esc(n.state)+'</span><span class="chip">'+esc(n.kind)+'</span>'+(n.badge?'<span class="chip">'+esc(n.badge)+'</span>':'')+(n.group?'<span class="chip">'+esc(n.group)+'</span>':'')+'</div>';
 if(n.bullets&&n.bullets.length)h+='<ul>'+n.bullets.map(b=>'<li>'+esc(b)+'</li>').join("")+'</ul>';
 for(const f of n.figures||[])h+='<figure>'+(f.src?'<img src="'+f.src+'" alt="'+esc(f.caption||n.title)+'">':'<div class="muted">figure unavailable</div>')+(f.caption?'<figcaption>'+esc(f.caption)+'</figcaption>':'')+'</figure>';
+if(n.artifacts&&n.artifacts.length)h+='<div class="files">'+n.artifacts.map(a=>'<a class="file" href="'+a.src+'" download="'+esc(a.name)+'">↧ '+esc(a.name)+(a.label?'<small>'+esc(a.label)+'</small>':'')+'</a>').join('')+'</div>';
 detail.className="";detail.innerHTML=h;
 detail.querySelectorAll("img").forEach(i=>i.onclick=()=>{lightboxImg.src=i.src;lightbox.hidden=false});}
 function bind(){chart.querySelectorAll(".skym-node").forEach(el=>{const n=nodes.find(n=>n.id===el.dataset.id);

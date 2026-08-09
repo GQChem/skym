@@ -107,6 +107,12 @@ test("titles and bullets reach the output", () => {
   assert.ok(svg.includes("TTL 60s"));
 });
 
+test("a node badge and attached-file count render on the card", () => {
+  const svg = draw(graph([node({ badge: "27 / 600", artifacts: [{ id: "a", file: "run.py", name: "run.py", mime: "text/x-python", bytes: 12 }] })]));
+  assert.ok(svg.includes("27 / 600"));
+  assert.ok(svg.includes("1 FILE"));
+});
+
 test("markup in content is escaped", () => {
   const svg = draw(graph([node({ title: '<script>alert("x")</script>', bullets: ["a & b"] })]));
   assert.ok(!svg.includes("<script>"), "raw script tag leaked");
