@@ -184,6 +184,8 @@ Each kind can also control both agent output and card presentation:
 
 `typeLabel` and `stateLabel` independently accept `top`, `left`, or `hidden`; side labels are drawn inside a wider, high-contrast state rail. `figures` accepts `inherit`, `show`, or `hide`. Restart the MCP server after changing a config file because node tools and their instructions are generated when the server starts.
 
+The Design dialog can also remove a node type. In JSON the same operation is portable as `"removeKinds": ["note"]`. Existing chart nodes are preserved, but the removed type no longer generates an MCP tool after restart.
+
 ## The service
 
 Charts live on the hosted service — that is where the viewer is, and it needs no setup. The first `flow_init` prints a short code and opens a browser; approve it once and every chart from that machine syncs.

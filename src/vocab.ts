@@ -350,6 +350,8 @@ export type VocabOverride = {
   /** Names a builtin template to start from instead of `default`. */
   template?: string;
   kinds?: Array<Partial<KindDef> & { slug: string }>;
+  /** Removes inherited kinds at this layer; a later layer may add them again. */
+  removeKinds?: string[];
 };
 
 export function resolveVocab(base: Vocabulary, ...overrides: (VocabOverride | undefined)[]): Vocabulary {
@@ -358,9 +360,9 @@ export function resolveVocab(base: Vocabulary, ...overrides: (VocabOverride | un
     if (!o) continue;
     const named = o.template ? BUILTIN_TEMPLATES[o.template] : undefined;
     if (named) out = named;
-    if (!o.kinds) continue;
     const byslug = new Map(out.kinds.map((k) => [k.slug, k]));
-    for (const patch of o.kinds) {
+    for (const slug of o.removeKinds ?? []) byslug.delete(slug);
+    for (const patch of o.kinds ?? []) {
       const existing = byslug.get(patch.slug);
       // A patch naming an unknown kind adds it, so a project can extend a template.
       byslug.set(patch.slug, {

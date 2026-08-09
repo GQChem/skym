@@ -75,6 +75,11 @@ test("the default template still names the original four kinds", () => {
   );
 });
 
+test("a configuration layer can remove an inherited node kind", () => {
+  const vocab = resolveVocab(DEFAULT_VOCAB, { removeKinds: ["note"] });
+  assert.deepEqual(vocab.kinds.map((kind) => kind.slug), ["action", "result", "options"]);
+});
+
 test("open and pulse states are the ones the viewer used to hardcode", () => {
   assert.deepEqual(openStates(DEFAULT_VOCAB).sort(), ["blocked", "exploring", "open", "planned", "waiting"]);
   assert.deepEqual(pulseStates(DEFAULT_VOCAB).sort(), ["exploring", "waiting"]);

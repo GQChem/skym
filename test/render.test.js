@@ -79,15 +79,26 @@ test("type and state labels can share a high-contrast side rail", () => {
   assert.ok(svg.includes("PLANNED"));
 });
 
-test("a state label can be hidden independently from its glyph", () => {
+test("a hidden state removes both its label and glyph from the title row", () => {
   const g = graph([node()]);
   const layout = layoutGraph(g, DEFAULT_THEME, dagre, false, "full", undefined, {
     action: { typeLabel: "top", stateLabel: "hidden" },
   });
   const svg = renderSvg(layout, { theme: DEFAULT_THEME, palette: paletteFor(DEFAULT_THEME, "light"), figureSrc: (f) => f });
   assert.ok(svg.includes("ACTION"));
-  assert.ok(svg.includes(STATE_GLYPH.planned));
+  assert.ok(!svg.includes(STATE_GLYPH.planned));
   assert.ok(!svg.includes("PLANNED"));
+});
+
+test("a left type with a hidden state leaves no metadata in the title row", () => {
+  const layout = layoutGraph(graph([node()]), DEFAULT_THEME, dagre, false, "full", undefined, {
+    action: { typeLabel: "left", stateLabel: "hidden" },
+  });
+  const svg = renderSvg(layout, { theme: DEFAULT_THEME, palette: paletteFor(DEFAULT_THEME, "light"), figureSrc: (f) => f });
+  assert.equal(layout.nodes[0].metaHeight, 0);
+  assert.ok(svg.includes("ACTION"));
+  assert.ok(!svg.includes('class="skym-glyph"'));
+  assert.ok(!svg.includes('class="skym-meta"'));
 });
 
 test("titles and bullets reach the output", () => {

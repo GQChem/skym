@@ -96,10 +96,10 @@
         <div class="design-topline">
           <label>Scope<select id="design-scope"><option value="project">This project</option><option value="global">All projects</option></select></label>
           <label>Node type<select id="design-kind"></select></label>
-          <button type="button" id="design-add">+ New type</button>
+          <div class="kind-actions"><button type="button" id="design-add">+ New type</button><button type="button" id="design-remove" class="danger-quiet">Remove</button></div>
         </div>
         <div class="design-grid">
-          <fieldset>
+          <fieldset class="agent-template">
             <legend>Identity & layout</legend>
             <label>Name<input id="kind-label" type="text" maxlength="40" /></label>
             <label>Type label<select id="kind-label-position"><option value="top">Above title</option><option value="left">Left rail</option><option value="hidden">Hidden</option></select></label>
@@ -115,12 +115,11 @@
             <label>Title instruction<input id="kind-title-rule" type="text" placeholder="One concise key concept" /></label>
             <label>Points instruction<textarea id="kind-bullet-rule" rows="2" placeholder="Properties, evidence and trade-offs; one fact per point"></textarea></label>
             <label>Figure instruction<textarea id="kind-figure-rule" rows="3" placeholder="When possible generate a figure; use this palette and style…"></textarea></label>
+            <div class="design-actions">
+              <span id="design-status" class="muted">Preview updates immediately.</span>
+              <div><button type="button" id="design-copy">Copy config</button><button type="button" id="design-save" class="active">Save preview</button></div>
+            </div>
           </fieldset>
-        </div>
-        <div class="design-actions">
-          <span id="design-status" class="muted">Preview updates immediately.</span>
-          <button type="button" id="design-copy">Copy config</button>
-          <button type="button" id="design-save" class="active">Save preview</button>
         </div>
       </form>
     </dialog>

@@ -23,6 +23,7 @@ export interface LaidOutNode {
   hiddenBullets: number;
   presentation: KindPresentation;
   sideRail: number;
+  metaHeight: number;
 }
 
 export interface LaidOutEdge {
@@ -186,10 +187,6 @@ export function measureNode(
   const wantFigure = presentation.figures === "show" ||
     (presentation.figures !== "hide" && showFigures);
 
-  const metaH = type.metaSize + 7;
-  const titleH = titleLines.length * type.titleLeading;
-  const bulletsH = bulletLines.length ? card.gap + bulletLines.length * type.bulletLeading : 0;
-
   // Widest real line, so the card can give back space nothing is using. The
   // meta row is included — it is often the widest thing on a short card.
   // Must match the string render.ts draws, or the card is measured wrong.
@@ -199,6 +196,9 @@ export function measureNode(
   const topMeta = [typeLabel === "top" ? kindText : "", stateLabel === "top" ? node.state.toUpperCase() : ""].filter(Boolean);
   const metaText = topMeta.join(" · ");
   const sideMeta = [typeLabel === "left" ? kindText : "", stateLabel === "left" ? node.state.toUpperCase() : ""].filter(Boolean).join(" · ");
+  const metaH = topMeta.length ? type.metaSize + 7 : 0;
+  const titleH = titleLines.length * type.titleLeading;
+  const bulletsH = bulletLines.length ? card.gap + bulletLines.length * type.bulletLeading : 0;
   const metaW =
     type.metaSize + 5 + textWidth(metaText, type.metaSize, type.metaWeight);
   const contentW = Math.max(
@@ -223,8 +223,9 @@ export function measureNode(
     figureH = card.gap + type.metaSize + 4;
   }
 
+  const compactMinHeight = metaH ? card.minHeight : Math.max(44, card.minHeight - (type.metaSize + 7));
   const h = Math.max(
-    card.minHeight,
+    compactMinHeight,
     sideMeta ? textWidth(sideMeta, type.metaSize, 700) + 24 : 0,
     card.padY * 2 + metaH + titleH + bulletsH + figureH,
   );
@@ -246,6 +247,7 @@ export function measureNode(
     hiddenBullets,
     presentation,
     sideRail,
+    metaHeight: metaH,
   };
 }
 

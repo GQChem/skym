@@ -59,14 +59,14 @@ function card(n: LaidOutNode, o: RenderOptions): string {
   const stateLabel = n.presentation.stateLabel ?? "top";
   const topMeta = [typeLabel === "top" ? kind.toUpperCase() : "", stateLabel === "top" ? n.node.state.toUpperCase() : ""].filter(Boolean);
   const metaBaseline = y + type.metaSize;
-  if (stateLabel !== "left") {
+  if (stateLabel === "top") {
     parts.push(
       `<text class="skym-glyph" x="${left}" y="${metaBaseline.toFixed(1)}" fill="${ink.accent}" ` +
         `font-size="${type.metaSize + 1.5}" font-weight="700">${esc(glyph)}</text>`,
     );
   }
   if (topMeta.length) parts.push(
-    `<text class="skym-meta" x="${(left + type.metaSize + 5).toFixed(1)}" y="${metaBaseline.toFixed(1)}" ` +
+    `<text class="skym-meta" x="${(stateLabel === "top" ? left + type.metaSize + 5 : left).toFixed(1)}" y="${metaBaseline.toFixed(1)}" ` +
       `fill="${palette.inkMuted}" font-size="${type.metaSize}" font-weight="${type.metaWeight}" ` +
       `letter-spacing="${type.metaTracking}em">${esc(topMeta.join(" · "))}</text>`,
   );
@@ -82,7 +82,7 @@ function card(n: LaidOutNode, o: RenderOptions): string {
         `letter-spacing="${type.metaTracking}em" text-anchor="middle">${esc(sideItems.join(" · "))}</text>`,
     );
   }
-  y += type.metaSize + 7;
+  y += n.metaHeight;
 
   for (const line of n.titleLines) {
     y += type.titleLeading;

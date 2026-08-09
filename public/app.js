@@ -578,6 +578,24 @@ $("design-add").addEventListener("click", () => {
   draw();
   populateKindPicker(slug);
 });
+$("design-remove").addEventListener("click", () => {
+  const kind = kindBySlug(editingSlug);
+  if (!kind || vocab.kinds.length <= 1) {
+    $("design-status").textContent = "A chart must keep at least one node type.";
+    return;
+  }
+  if (!confirm(`Remove the “${kind.label}” node type from ${designScope.value === "global" ? "all projects" : "this project"}? Existing nodes are not deleted.`)) return;
+  const scope = designScope.value;
+  const layer = readDesign(scope);
+  const removeKinds = [...new Set([...(layer.removeKinds ?? []), editingSlug])];
+  const kinds = (layer.kinds ?? []).filter((item) => item.slug !== editingSlug);
+  store.set(designKey(scope), JSON.stringify({ ...layer, kinds, removeKinds }));
+  applyDesignLayers();
+  renderLegend();
+  draw();
+  populateKindPicker(vocab.kinds[0]?.slug);
+  $("design-status").textContent = `${kind.label} removed from the ${scope} design.`;
+});
 
 const promptFor = (n) => {
   const lines = [`Work on node "${n.id}" from the chart: ${n.title}`];

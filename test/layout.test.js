@@ -90,6 +90,15 @@ test("side labels reserve a real rail instead of overlapping the state stripe", 
   assert.ok(m.sideRail > DEFAULT_THEME.card.stripe);
 });
 
+test("hiding both labels removes the metadata row and shortens content", () => {
+  const visible = measureNode(node({ title: "Short" }), DEFAULT_THEME, false);
+  const hidden = measureNode(node({ title: "Short" }), DEFAULT_THEME, false, "full", undefined, {
+    action: { typeLabel: "hidden", stateLabel: "hidden" },
+  });
+  assert.equal(hidden.metaHeight, 0);
+  assert.ok(hidden.h < visible.h);
+});
+
 test("bullets past the cap are counted, not rendered", () => {
   const bullets = Array.from({ length: 20 }, (_, i) => `bullet number ${i}`);
   const m = measureNode(node({ bullets }), DEFAULT_THEME, false);
