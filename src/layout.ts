@@ -387,6 +387,64 @@ export function layoutGraph(
     nodeRanks.set(m.id, Math.round(vertical ? pos.y : pos.x));
   }
 
+  // Align disconnected trees by translating whole components, never just
+  // their roots. Packing them into disjoint cross-axis lanes prevents a moved
+  // tree (and every edge inside it) from passing through another tree.
+  const neighbours = new Map<string, Set<string>>(measured.map((node) => [node.id, new Set()]));
+  const childIds = new Set<string>();
+  for (const edge of graph.edges) {
+    if (!byId.has(edge.from) || !byId.has(edge.to)) continue;
+    neighbours.get(edge.from)!.add(edge.to);
+    neighbours.get(edge.to)!.add(edge.from);
+    childIds.add(edge.to);
+  }
+  const components: LaidOutNode[][] = [];
+  const visited = new Set<string>();
+  for (const start of measured) {
+    if (visited.has(start.id)) continue;
+    const component: LaidOutNode[] = [];
+    const queue = [start.id];
+    visited.add(start.id);
+    while (queue.length) {
+      const id = queue.shift()!;
+      component.push(byId.get(id)!);
+      for (const next of neighbours.get(id) ?? []) {
+        if (visited.has(next)) continue;
+        visited.add(next);
+        queue.push(next);
+      }
+    }
+    components.push(component);
+  }
+  const starts = components.map((component) => {
+    const roots = component.filter((node) => !childIds.has(node.id));
+    const candidates = roots.length ? roots : component;
+    return Math.min(...candidates.map((node) => vertical ? node.y : node.x));
+  });
+  const sharedStart = starts.length ? Math.min(...starts) : 0;
+  for (let i = 0; i < components.length; i++) {
+    const delta = sharedStart - starts[i];
+    for (const node of components[i]) {
+      if (vertical) node.y += delta;
+      else node.x += delta;
+    }
+  }
+  const crossStart = (component: LaidOutNode[]) => Math.min(...component.map((node) => vertical ? node.x : node.y));
+  const crossEnd = (component: LaidOutNode[]) => Math.max(...component.map((node) => vertical ? node.x + node.w : node.y + node.h));
+  components.sort((a, b) => crossStart(a) - crossStart(b));
+  let crossCursor = Number.NEGATIVE_INFINITY;
+  for (const component of components) {
+    const start = crossStart(component);
+    const shift = Number.isFinite(crossCursor) ? Math.max(0, crossCursor + theme.layout.nodeGap - start) : 0;
+    if (shift) {
+      for (const node of component) {
+        if (vertical) node.x += shift;
+        else node.y += shift;
+      }
+    }
+    crossCursor = crossEnd(component);
+  }
+
   const childrenByParent = new Map<string, LaidOutNode[]>();
   const parentsByChild = new Map<string, LaidOutNode[]>();
   for (const edge of graph.edges) {
@@ -429,11 +487,6 @@ export function layoutGraph(
       for (let i = 1; i < generation.length; i++) union(generation[0].id, generation[i].id);
     }
   }
-  // Separate trees share only their starting line; their descendants remain
-  // independently compact unless an actual sibling/co-parent relation joins them.
-  const childIds = new Set(graph.edges.map((edge) => edge.to));
-  const roots = measured.filter((node) => !childIds.has(node.id));
-  for (let i = 1; i < roots.length; i++) union(roots[0].id, roots[i].id);
   const alignmentGroups = new Map<string, LaidOutNode[]>();
   for (const m of measured) {
     const root = find(m.id);

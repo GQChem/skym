@@ -68,6 +68,35 @@ test("more bullets make a taller card", () => {
   assert.ok(many.h > few.h);
 });
 
+const lineSegments = (path) => {
+  const segments = [];
+  let previous;
+  for (const match of path.matchAll(/([ML])(-?[\d.]+),(-?[\d.]+)|Q(-?[\d.]+),(-?[\d.]+) (-?[\d.]+),(-?[\d.]+)/g)) {
+    const command = match[1] ?? "Q";
+    const point = command === "Q"
+      ? { x: Number(match[6]), y: Number(match[7]) }
+      : { x: Number(match[2]), y: Number(match[3]) };
+    if (command === "L" && previous) segments.push([previous, point]);
+    previous = point;
+  }
+  return segments;
+};
+
+const segmentCrossesNode = ([a, b], node) => {
+  const inset = 0.5;
+  const left = node.x + inset;
+  const right = node.x + node.w - inset;
+  const top = node.y + inset;
+  const bottom = node.y + node.h - inset;
+  if (Math.abs(a.x - b.x) < 0.01) {
+    return a.x > left && a.x < right && Math.max(a.y, b.y) > top && Math.min(a.y, b.y) < bottom;
+  }
+  if (Math.abs(a.y - b.y) < 0.01) {
+    return a.y > top && a.y < bottom && Math.max(a.x, b.x) > left && Math.min(a.x, b.x) < right;
+  }
+  return false;
+};
+
 test("the default theme keeps charts deliberately dense", () => {
   assert.ok(DEFAULT_THEME.layout.rankGap <= 12);
   assert.ok(DEFAULT_THEME.layout.nodeGap <= 14);
@@ -260,6 +289,40 @@ test("roots of disconnected trees share a top edge", () => {
     out.nodes.find((item) => item.id === "root-a").y,
     out.nodes.find((item) => item.id === "root-b").y,
   );
+});
+
+test("aligning disconnected roots moves and packs their whole trees", () => {
+  const nodes = [
+    node({ id: "a0", bullets: ["one", "two", "three"] }),
+    node({ id: "a1" }),
+    node({ id: "a2", bullets: ["one", "two"] }),
+    node({ id: "a3" }),
+    node({ id: "b0" }),
+    node({ id: "b1", bullets: ["one", "two", "three", "four"] }),
+  ];
+  const edges = [
+    { id: "ea1", from: "a0", to: "a1", dashed: false },
+    { id: "ea2", from: "a1", to: "a2", dashed: false },
+    { id: "ea3", from: "a2", to: "a3", dashed: false },
+    { id: "eb1", from: "b0", to: "b1", dashed: false },
+  ];
+  const out = layoutGraph(graph(nodes, edges), DEFAULT_THEME, dagre, false);
+  for (let i = 0; i < out.nodes.length; i++) {
+    for (let j = i + 1; j < out.nodes.length; j++) {
+      const a = out.nodes[i];
+      const b = out.nodes[j];
+      const disjoint = a.x + a.w <= b.x || b.x + b.w <= a.x || a.y + a.h <= b.y || b.y + b.h <= a.y;
+      assert.ok(disjoint, `${a.id} overlaps ${b.id}`);
+    }
+  }
+  for (const edge of out.edges) {
+    for (const candidate of out.nodes.filter((node) => node.id !== edge.from && node.id !== edge.to)) {
+      assert.ok(
+        !lineSegments(edge.path).some((segment) => segmentCrossesNode(segment, candidate)),
+        `${edge.id} passes through ${candidate.id}`,
+      );
+    }
+  }
 });
 
 test("fan-out edges share one trunk before branching", () => {
