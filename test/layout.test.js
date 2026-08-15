@@ -191,6 +191,26 @@ test("vertical parent-child ranks stay tightly stacked", () => {
   assert.ok(b.y - (a.y + a.h) <= 12, "vertical rank gap exceeded the compact default");
 });
 
+test("children with different heights align along their top edge", () => {
+  const nodes = [
+    node({ id: "parent" }),
+    node({ id: "short", title: "Short" }),
+    node({ id: "tall", title: "Tall", bullets: ["one", "two", "three", "four"] }),
+  ];
+  const edges = [
+    { id: "e1", from: "parent", to: "short", dashed: false },
+    { id: "e2", from: "parent", to: "tall", dashed: false },
+  ];
+  const out = layoutGraph(graph(nodes, edges), DEFAULT_THEME, dagre, false);
+  const short = out.nodes.find((item) => item.id === "short");
+  const tall = out.nodes.find((item) => item.id === "tall");
+  assert.equal(short.y, tall.y, "sibling cards should start on the same horizontal line");
+
+  const parent = out.nodes.find((item) => item.id === "parent");
+  const gap = short.y - (parent.y + parent.h);
+  assert.ok(gap <= DEFAULT_THEME.layout.rankGap, "short sibling must not create an artificially long arrow");
+});
+
 test("an arrow path reaches the destination card border", () => {
   const out = layoutGraph(
     graph([node({ id: "a" }), node({ id: "b" })], [{ id: "e", from: "a", to: "b", dashed: false }]),

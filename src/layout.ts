@@ -375,11 +375,30 @@ export function layoutGraph(
 
   dagre.layout(g);
 
+  // Dagre aligns the centres of nodes in a rank. When sibling cards have
+  // different heights that staggers their top edges and makes arrows into the
+  // shorter cards look much longer. Align the leading edge of every rank
+  // instead; edges are routed from these adjusted card bounds below.
+  const rankBuckets = new Map<number, LaidOutNode[]>();
   for (const m of measured) {
     const pos = g.node(m.id);
     if (!pos) continue;
     m.x = pos.x - m.w / 2;
     m.y = pos.y - m.h / 2;
+    const rank = Math.round(vertical ? pos.y : pos.x);
+    const bucket = rankBuckets.get(rank) ?? [];
+    bucket.push(m);
+    rankBuckets.set(rank, bucket);
+  }
+  for (const members of rankBuckets.values()) {
+    if (members.length < 2) continue;
+    if (vertical) {
+      const top = Math.min(...members.map((m) => m.y));
+      for (const m of members) m.y = top;
+    } else {
+      const left = Math.min(...members.map((m) => m.x));
+      for (const m of members) m.x = left;
+    }
   }
 
   const laidOutEdges: LaidOutEdge[] = [];
