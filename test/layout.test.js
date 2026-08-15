@@ -68,6 +68,13 @@ test("more bullets make a taller card", () => {
   assert.ok(many.h > few.h);
 });
 
+test("the default theme keeps charts deliberately dense", () => {
+  assert.ok(DEFAULT_THEME.layout.rankGap <= 30);
+  assert.ok(DEFAULT_THEME.layout.nodeGap <= 14);
+  assert.ok(DEFAULT_THEME.card.padX <= 12);
+  assert.ok(DEFAULT_THEME.card.padY <= 9);
+});
+
 test("a kind can hide its bullets without changing the node data", () => {
   const m = measureNode(node({ bullets: ["one", "two"] }), DEFAULT_THEME, false, "full", undefined, {
     action: { bullets: false },
@@ -306,6 +313,8 @@ test("compact drops bullets but keeps the figure", () => {
   assert.equal(compact.bulletLines.length, 0, "compact should drop bullets");
   assert.ok(compact.figure, "the Figures toggle hides figures, not the zoom level");
   assert.ok(full.h > compact.h, "shedding bullets must shrink the card");
+  assert.ok(compact.titleSize > full.titleSize, "the title should grow when body copy disappears");
+  assert.ok(compact.titleLeading > full.titleLeading, "larger compact titles need matching line height");
 });
 
 test("the Figures toggle still governs figures at every level", () => {

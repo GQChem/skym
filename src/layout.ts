@@ -25,6 +25,9 @@ export interface LaidOutNode {
   sideRail: number;
   metaHeight: number;
   badgeHeight: number;
+  /** Titles become the primary visual signal when compact mode removes body copy. */
+  titleSize: number;
+  titleLeading: number;
 }
 
 export interface LaidOutEdge {
@@ -149,17 +152,19 @@ export function measureNode(
   kindPresentation: Record<string, KindPresentation> = {},
 ): LaidOutNode {
   const { card, type } = theme;
+  const titleSize = detail === "compact" ? type.titleSize * 1.25 : type.titleSize;
+  const titleLeading = detail === "compact" ? type.titleLeading + 4 : type.titleLeading;
   const presentation = kindPresentation[node.kind] ?? {};
   const sideRail = presentation.typeLabel === "left" || presentation.stateLabel === "left" ? 30 : card.stripe;
   const chrome = card.padX * 2 + sideRail;
   const inner = card.width - chrome;
 
-  const rawTitle = wrap(node.title, type.titleSize, inner, type.titleWeight);
+  const rawTitle = wrap(node.title, titleSize, inner, type.titleWeight);
   const titleLines = rawTitle.slice(0, MAX_TITLE_LINES);
   if (rawTitle.length > MAX_TITLE_LINES) {
     titleLines[MAX_TITLE_LINES - 1] = truncateToWidth(
       titleLines[MAX_TITLE_LINES - 1],
-      type.titleSize,
+      titleSize,
       inner,
       type.titleWeight,
     );
@@ -199,7 +204,7 @@ export function measureNode(
   const sideMeta = [typeLabel === "left" ? kindText : "", stateLabel === "left" ? node.state.toUpperCase() : ""].filter(Boolean).join(" · ");
   const metaH = topMeta.length ? type.metaSize + 7 : 0;
   const badgeH = node.badge ? 25 : 0;
-  const titleH = titleLines.length * type.titleLeading;
+  const titleH = titleLines.length * titleLeading;
   const bulletsH = bulletLines.length ? card.gap + bulletLines.length * type.bulletLeading : 0;
   const artifactH = node.artifacts?.length ? card.gap + type.metaSize + 4 : 0;
   const metaW =
@@ -207,7 +212,7 @@ export function measureNode(
   const contentW = Math.max(
     metaW,
     node.badge ? textWidth(node.badge, 10, 700) + 18 : 0,
-    ...titleLines.map((t) => textWidth(t, type.titleSize, type.titleWeight)),
+    ...titleLines.map((t) => textWidth(t, titleSize, type.titleWeight)),
     ...bulletLines.map((b) => MARKER_INDENT + textWidth(b.text, type.bulletSize)),
     // A figure is laid out against the ceiling, so it pins the card open.
     wantFigure && node.figures.length ? inner : 0,
@@ -253,6 +258,8 @@ export function measureNode(
     sideRail,
     metaHeight: metaH,
     badgeHeight: badgeH,
+    titleSize,
+    titleLeading,
   };
 }
 
@@ -312,8 +319,9 @@ function orthogonalPath(points: { x: number; y: number }[], radius: number, vert
   ].join(" ");
 }
 
-const CLUSTER_PAD = 26;
-const CLUSTER_HEAD = 22;
+const CLUSTER_PAD = 18;
+const CLUSTER_HEAD = 18;
+const CANVAS_MARGIN = 10;
 
 export function layoutGraph(
   graph: Graph,
@@ -336,8 +344,8 @@ export function layoutGraph(
     rankdir: graph.direction,
     ranksep: theme.layout.rankGap + (hasGroups ? CLUSTER_PAD + CLUSTER_HEAD : 0),
     nodesep: theme.layout.nodeGap,
-    marginx: 24,
-    marginy: 24,
+    marginx: CANVAS_MARGIN,
+    marginy: CANVAS_MARGIN,
   });
   g.setDefaultEdgeLabel(() => ({}));
 

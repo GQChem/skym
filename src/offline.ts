@@ -78,7 +78,7 @@ button{padding:5px 11px;font:inherit;font-size:13px;color:var(--fg);background:t
 button:hover{border-color:var(--accent);color:var(--accent)}button.active{color:#fff;background:var(--accent);border-color:var(--accent)}
 main{display:grid;grid-template-columns:minmax(0,1fr) 330px;min-height:0}
 .stage{position:relative;overflow:hidden;cursor:grab}.stage.dragging{cursor:grabbing}
-.chart{position:absolute;top:0;left:0;transform-origin:0 0;padding:24px}.chart svg{display:block}
+.chart{position:absolute;top:0;left:0;transform-origin:0 0;padding:12px}.chart svg{display:block}
 .skym-node{cursor:pointer}.skym-figure{cursor:zoom-in}
 aside{overflow-y:auto;padding:14px 16px 24px;border-left:1px solid var(--border);background:var(--panel)}
 aside h2{font-size:11px;letter-spacing:.09em;text-transform:uppercase;color:var(--muted);margin:0 0 8px;font-weight:600}

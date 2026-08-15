@@ -107,6 +107,17 @@ test("titles and bullets reach the output", () => {
   assert.ok(svg.includes("TTL 60s"));
 });
 
+test("compact mode renders a larger title", () => {
+  const n = node({ title: "Primary signal", bullets: ["supporting detail"] });
+  const fullLayout = layoutGraph(graph([n]), DEFAULT_THEME, dagre, false, "full");
+  const compactLayout = layoutGraph(graph([n]), DEFAULT_THEME, dagre, false, "compact");
+  const options = { theme: DEFAULT_THEME, palette: paletteFor(DEFAULT_THEME, "light"), figureSrc: (f) => f };
+  const full = renderSvg(fullLayout, options);
+  const compact = renderSvg(compactLayout, options);
+  assert.match(full, /class="skym-title"[^>]+font-size="14"/);
+  assert.match(compact, /class="skym-title"[^>]+font-size="17\.5"/);
+});
+
 test("a node badge and attached-file count render on the card", () => {
   const svg = draw(graph([node({ badge: "27 / 600", artifacts: [{ id: "a", file: "run.py", name: "run.py", mime: "text/x-python", bytes: 12 }] })]));
   assert.ok(svg.includes("27 / 600"));

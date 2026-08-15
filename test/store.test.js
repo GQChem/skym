@@ -14,6 +14,25 @@ test("does not create a directory until init names the chart", () => {
   assert.equal(fs.existsSync(path.join(root, "charts")), false, "no dir before init");
 });
 
+test("chart ids, lifecycle, merge, and provenance are persisted safely", () => {
+  const root = tmp();
+  const source = mk(root, "source-start");
+  source.init("Source", undefined, "TD", true, undefined, "source", true);
+  source.upsertNode({ id: "result", title: "Produced run", kind: "result", state: "good", provenance: { script: "run.py", outputPath: "run-007", jobId: "42" } });
+  source.release();
+
+  const target = mk(root, "target-start");
+  target.init("Target", undefined, "TD", true, undefined, "target", true);
+  target.rename("Renamed target");
+  assert.equal(target.get().title, "Renamed target");
+  assert.deepEqual(target.mergeFrom("source"), { nodes: 1, edges: 0 });
+  assert.equal(target.findNode("result").provenance.outputPath, "run-007");
+  const targetDir = target.chartDir;
+  target.deleteChart();
+  assert.equal(fs.existsSync(targetDir), false);
+  assert.equal(target.listCharts().some((chart) => chart.chartId === "target"), false);
+});
+
 test("init slugs the directory from the title", () => {
   const root = tmp();
   const s = mk(root);

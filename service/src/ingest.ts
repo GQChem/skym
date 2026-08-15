@@ -119,6 +119,12 @@ function validate(graph: Graph, entry: Entry): void {
       if (op.badge !== undefined && op.badge !== null && (typeof op.badge !== "string" || op.badge.length > 24)) {
         throw new ValidationError("node badge must be at most 24 characters");
       }
+      if (op.provenance !== undefined && op.provenance !== null && typeof op.provenance !== "object") {
+        throw new ValidationError("node provenance must be an object");
+      }
+      if (op.derivedBadge !== undefined && op.derivedBadge !== null && typeof op.derivedBadge !== "object") {
+        throw new ValidationError("node derived badge must be an object");
+      }
       checkNodeCeiling(graph, !graph.nodes.some((n) => n.id === op.id));
       break;
     }

@@ -54,8 +54,8 @@ test("exposes the expected tool surface", async () => {
   try {
     const names = (await s.client.listTools()).tools.map((t) => t.name).sort();
     assert.deepEqual(names, [
-      "flow_action", "flow_chart", "flow_command_state", "flow_data", "flow_edge", "flow_figure", "flow_file", "flow_find", "flow_inbox",
-      "flow_init", "flow_note", "flow_options", "flow_remove", "flow_result",
+      "flow_action", "flow_chart", "flow_command_state", "flow_data", "flow_delete", "flow_edge", "flow_figure", "flow_file", "flow_find", "flow_inbox",
+      "flow_init", "flow_lineage", "flow_merge", "flow_note", "flow_options", "flow_remove", "flow_rename", "flow_result", "flow_retract",
       "flow_show", "flow_state",
     ]);
   } finally {
@@ -143,6 +143,7 @@ test("builds a tree and reports state counts", async () => {
     const r = await call("flow_result", { id: "b", title: "It worked", state: "good", after: "a" });
     assert.match(text(r), /1 done/);
     assert.match(text(r), /1 good/);
+    assert.match(text(r), /0 pending prompts/);
 
     const shown = text(await call("flow_show", {}));
     assert.ok(shown.includes("n_a --> n_b"), "after: should draw the edge");
@@ -159,6 +160,22 @@ test("rejects a state that belongs to another kind", async () => {
     assert.ok(bad.isError, "good is not an action state");
     const bad2 = await s.client.callTool({ name: "flow_result", arguments: { id: "y", state: "done" } });
     assert.ok(bad2.isError, "done is not a result state");
+  } finally {
+    await s.client.close();
+  }
+});
+
+test("retraction is restricted to node kinds that support it", async () => {
+  const s = await boot();
+  try {
+    const call = (name, args) => s.client.callTool({ name, arguments: args });
+    await call("flow_init", { title: "Retractions" });
+    await call("flow_action", { id: "a", title: "Run analysis" });
+    const bad = await call("flow_retract", { node_id: "a", reason: "Wrong target" });
+    assert.ok(bad.isError, "an action cannot take the result-only retracted state");
+    await call("flow_result", { id: "r", title: "Reported value", state: "good" });
+    const good = await call("flow_retract", { node_id: "r", reason: "Input was stale" });
+    assert.match(text(good), /Retracted "r"/);
   } finally {
     await s.client.close();
   }

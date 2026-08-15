@@ -36,11 +36,13 @@ Node bodies are concise bullets. The server rejects prose-shaped bullets, states
 | Tool | Purpose |
 | --- | --- |
 | `flow_init` | Start this chat's chart and open the viewer. `folder:` chooses where it is saved. |
+| `flow_rename` / `flow_delete` / `flow_merge` | Manage charts by stable `chart_id`; deletion requires the exact active id. |
 | `flow_action` | Add/update an action. `after:` chains it to a previous node. |
 | `flow_result` | Add/update a result. Attach evidence with `flow_figure`. |
 | `flow_options` | Record a fork and seed its candidate branches. |
 | `flow_note` | Record a constraint, fact, or open question that shapes the work. |
 | `flow_find` | Search the chart by text, kind, or state — for resuming one you did not build. |
+| `flow_lineage` | Find an artifact/output/job and trace its incoming provenance chain to the origins. |
 | `flow_state` | Move a node to a new state as work progresses. |
 | `flow_edge` | Link nodes when the relation is not a simple follow-on. |
 | `flow_chart` | Draw a chart from data — no image generation, styled to match the cards. |
@@ -48,9 +50,12 @@ Node bodies are concise bullets. The server rejects prose-shaped bullets, states
 | `flow_figure` | Embed an image on a node, from a path or base64. `replace:` swaps it instead of appending. |
 | `flow_file` | Attach a local source file, config, report, PDF, or archive without sending its contents through model context. |
 | `flow_remove` | Delete a node or edge — prefer `abandoned` over deleting. |
+| `flow_retract` | Mark an incorrect claim or measurement as `retracted`, distinct from a failed result. |
 | `flow_show` | Return Mermaid source; `list_charts:true` lists other chats' charts. |
 | `flow_inbox` | Claim work requested from the hosted chart. |
 | `flow_command_state` | Mark a hosted request running, done, or failed. |
+
+Every tool response footer includes the number of pending hosted prompts. In the viewer, right-click a node and choose **Work on this** for a custom instruction or **Explain** for an explanation grounded in that node's chart context.
 
 ## Charts from data
 
@@ -125,7 +130,9 @@ server or internet.
 
 **Choosing the folder.** `flow_init` takes a `folder` argument to put a chart beside the work it documents — `flow_init({ title: "Cache benchmarks", folder: "experiments/run-3" })` writes to `experiments/run-3/charts/cache-benchmarks/`. Relative paths resolve against the project directory; an absolute path is taken as given, so a chart can live beside work outside the project. Without it, charts go to `.flows/`.
 
-**Resuming.** Calling `flow_init` with a title that already exists reattaches to that chart and continues its tree — so a chat picks up where it left off after a Claude Code restart. Pass `fresh: true` to force a new chart instead. A chart held by a *running* session is never adopted: each chat takes the next free suffix, enforced by an advisory `.lock` file claimed with an exclusive `wx` write. Locks whose process has died are swept automatically.
+**Creating and resuming.** Prefer an explicit intent: `flow_init({title:"…", fresh:true})` creates and refuses a duplicate title; `flow_init({title:"…", fresh:false})` resumes and fails when none exists. `flow_init({chart_id:"…"})` resumes the exact id printed by `flow_show({list_charts:true})`, so duplicate historical titles are never ambiguous. Omitting `fresh` retains the legacy create-or-resume behavior. A chart held by a running session is not adopted; locks whose process died are swept automatically.
+
+**Structured provenance.** Every generated node tool accepts `provenance:{script,output_path,job_id,date,commit}`. These fields are searched by `flow_find` and used by `flow_lineage`; they should complement `flow_file`, which carries the actual reproducibility artifact. `flow_data` also accepts `badge:"value"|"fraction"|"percent"`; the recipe is stored and recalculated from the local source whenever `flow_show` reads the chart.
 
 The shipped `.gitignore` commits `graph.json` but ignores `assets/` — charts stay reviewable in diffs without dragging binaries into history. Delete that line to commit figures too.
 

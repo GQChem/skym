@@ -230,6 +230,7 @@ async function ensureViewer(): Promise<string> {
   // closes, which fires neither SIGINT nor SIGTERM, and `exit` cannot await.
   // A tool call is already async, so the round trip costs nothing structural.
   if (sync?.pending) await sync.flush().catch(() => null);
+  if (sync) await sync.refreshPendingCommands().catch(() => null);
   return url;
 }
 
@@ -245,7 +246,8 @@ function summary(lead: string, hint?: string): string {
   }, {});
   const tally = Object.entries(byState).map(([k, v]) => `${v} ${k}`).join(", ") || "empty";
   const url = chartUrl();
-  return [lead, hint, `"${g.title}" rev ${g.revision} · ${g.nodes.length} nodes (${tally}) · ${url}`]
+  const prompts = sync?.pendingCommands ?? 0;
+  return [lead, hint, `"${g.title}" rev ${g.revision} · ${g.nodes.length} nodes (${tally}) · ${prompts} pending prompt${prompts === 1 ? "" : "s"} · ${url}`]
     .filter(Boolean)
     .join("\n");
 }
@@ -265,6 +267,24 @@ function resolveFolder(folder: string): string {
   return path.resolve(projectDir, folder);
 }
 
+/** Re-evaluate badge recipes when the chart is read, so source-file changes cannot silently diverge. */
+function refreshDerivedBadges(): void {
+  for (const node of [...store.get().nodes]) {
+    const recipe = node.derivedBadge;
+    if (!recipe) continue;
+    try {
+      const file = path.isAbsolute(recipe.source) ? recipe.source : path.resolve(projectDir, recipe.source);
+      const selected = dataPointsFromFile(file, { kind: recipe.kind ?? "stat", valueColumn: recipe.valueColumn });
+      const value = selected.points.at(-1)!.value;
+      const badge = recipe.format === "fraction" ? `${value} / ${selected.totalRows}`
+        : recipe.format === "percent" ? `${((value / selected.totalRows) * 100).toFixed(1)}%` : `${value}`;
+      if (badge !== node.badge) store.upsertNode({ id: node.id, badge });
+    } catch {
+      // Keep the last verified value; the recipe remains available for the next refresh.
+    }
+  }
+}
+
 const assertState = (kind: NodeKind, state: string | undefined): NodeState | undefined =>
   checkState(vocab, kind, state);
 
@@ -277,7 +297,8 @@ server.registerTool(
     description:
       "Create the exploration chart for THIS conversation and open the live viewer. Call once at the start. Each chat gets its own chart; the title should name what this chat is about (e.g. \"Fixing the auth redirect loop\").",
     inputSchema: {
-      title: z.string().min(1).describe("What this chat is working on. Shown in the viewer and the chart switcher."),
+      title: z.string().min(1).optional().describe("Required when creating; optional when resuming by chart_id."),
+      chart_id: z.string().optional().describe("Exact id returned by flow_show({list_charts:true})."),
       description: z.string().optional().describe("One-line goal for this exploration."),
       direction: z.enum(["TD", "LR", "BT", "RL"]).optional().describe("Layout. TD (default) reads as a top-down tree."),
       fresh: z
@@ -294,9 +315,13 @@ server.registerTool(
         ),
     },
   },
-  async ({ title, description, direction, fresh, folder }) => {
+  async ({ title, chart_id, description, direction, fresh, folder }) => {
     const root = folder ? resolveFolder(folder) : undefined;
-    const { resumed } = store.init(title, description, (direction as Direction) ?? "TD", fresh ?? false, root);
+    if (!title && !chart_id) throw new Error("Provide title or chart_id.");
+    if (fresh && !title) throw new Error("title is required with fresh:true.");
+    const resolvedTitle = title ?? store.listCharts().find((c) => c.chartId === chart_id)?.title;
+    if (!resolvedTitle) throw new Error(`No chart with chart_id "${chart_id}".`);
+    const { resumed } = store.init(resolvedTitle, description, (direction as Direction) ?? "TD", fresh ?? false, root, chart_id, fresh !== undefined || !!chart_id);
     // init renames the chart to a slug derived from the title. A tool called
     // before this one would already have attached under the random per-process
     // id, forking a fresh chart on the service for every chat — the same title
@@ -311,8 +336,8 @@ server.registerTool(
     return ok(
       summary(
         resumed
-          ? `Resumed chart "${title}" with ${g.nodes.length} existing nodes.\nSaved in ${path.relative(projectDir, store.chartDir) || store.chartDir}`
-          : `Chart "${title}" ready.\nSaved in ${path.relative(projectDir, store.chartDir) || store.chartDir}`,
+          ? `Resumed chart "${resolvedTitle}" (${store.chartId}) with ${g.nodes.length} existing nodes.\nSaved in ${path.relative(projectDir, store.chartDir) || store.chartDir}`
+          : `Chart "${resolvedTitle}" (${store.chartId}) ready.\nSaved in ${path.relative(projectDir, store.chartDir) || store.chartDir}`,
         resumed
           ? "Continue the existing tree — check current states before adding nodes, and reuse existing ids to update them."
           : "Next: add an options node for the choices you see, or an action node for what you're doing first.",
@@ -322,6 +347,37 @@ server.registerTool(
     );
   },
 );
+
+server.registerTool("flow_rename", {
+  title: "Rename the current chart",
+  description: "Change the display title without changing its stable chart_id.",
+  inputSchema: { title: z.string().min(1) },
+}, async ({ title }) => {
+  store.rename(title);
+  await ensureViewer();
+  return ok(summary(`Renamed chart to "${title}".`));
+});
+
+server.registerTool("flow_delete", {
+  title: "Delete a chart",
+  description: "Permanently delete the active local chart. Requires its exact chart_id as confirmation.",
+  inputSchema: { chart_id: z.string() },
+}, async ({ chart_id }) => {
+  if (chart_id !== store.chartId) throw new Error(`Confirmation must equal active chart_id "${store.chartId}".`);
+  if (sync) await sync.deleteChart();
+  store.deleteChart();
+  return ok(`Deleted chart "${chart_id}" locally${sync ? " and from the hosted service" : ""}. This cannot be recovered by skym.`);
+});
+
+server.registerTool("flow_merge", {
+  title: "Merge another chart into this chart",
+  description: "Copy nodes and edges from another chart_id. Conflicting node ids are prefixed with the source chart_id.",
+  inputSchema: { chart_id: z.string() },
+}, async ({ chart_id }) => {
+  const merged = store.mergeFrom(chart_id);
+  await ensureViewer();
+  return ok(summary(`Merged ${merged.nodes} nodes and ${merged.edges} edges from "${chart_id}".`));
+});
 
 /** "planned = candidate step, not started; exploring = …" — teaches the model the vocabulary. */
 function stateProse(kind: KindDef): string {
@@ -346,6 +402,13 @@ function registerKindTool(kind: KindDef): void {
     badge: z.string().max(24).nullable().optional().describe(
       "Compact marker at the card's top-left: a count ('10,000'), reduction ('27 / 600'), or final id. Null clears it.",
     ),
+    provenance: z.object({
+      script: z.string().optional(),
+      output_path: z.string().optional(),
+      job_id: z.string().optional(),
+      date: z.string().optional(),
+      commit: z.string().optional(),
+    }).nullable().optional().describe("Structured, searchable origin of this result."),
   };
 
   const shape: Record<string, z.ZodTypeAny> = { ...common };
@@ -379,13 +442,14 @@ function registerKindTool(kind: KindDef): void {
       inputSchema: shape,
     },
     async (args: Record<string, unknown>) => {
-      const { id, title, bullets, state, group, badge, after, edge_label, about } = args as {
+      const { id, title, bullets, state, group, badge, provenance, after, edge_label, about } = args as {
         id: string;
         title?: string;
         bullets?: string[];
         state?: string;
         group?: string;
         badge?: string | null;
+        provenance?: { script?: string; output_path?: string; job_id?: string; date?: string; commit?: string } | null;
         after?: string;
         edge_label?: string;
         about?: string;
@@ -393,7 +457,8 @@ function registerKindTool(kind: KindDef): void {
       validateBullets(bullets);
       // A new node takes the kind's default; an update with no state keeps its own.
       const resolved = assertState(kind.slug, state) ?? (store.findNode(id) ? undefined : kind.defaultState);
-      store.upsertNode({ id, title, kind: kind.slug, state: resolved, bullets, group, badge });
+      store.upsertNode({ id, title, kind: kind.slug, state: resolved, bullets, group, badge,
+        provenance: provenance === null ? null : provenance ? { script: provenance.script, outputPath: provenance.output_path, jobId: provenance.job_id, date: provenance.date, commit: provenance.commit } : undefined });
       if (after) {
         if (!store.findNode(after)) throw new Error(`Cannot link from unknown node "${after}".`);
         store.addEdge(after, id, edge_label, false);
@@ -612,6 +677,7 @@ server.registerTool(
     },
   },
   async ({ query, kind, state, unresolved, limit }) => {
+    await ensureViewer();
     const g = store.get();
     const needle = query?.toLowerCase();
 
@@ -623,7 +689,8 @@ server.registerTool(
       return (
         n.id.toLowerCase().includes(needle) ||
         n.title.toLowerCase().includes(needle) ||
-        n.bullets.some((b) => b.toLowerCase().includes(needle))
+        n.bullets.some((b) => b.toLowerCase().includes(needle)) ||
+        Object.values(n.provenance ?? {}).some((value) => value?.toLowerCase().includes(needle))
       );
     });
 
@@ -638,7 +705,8 @@ server.registerTool(
       const figures = n.figures.length ? ` [${n.figures.length} fig]` : "";
       const files = n.artifacts?.length ? ` [${n.artifacts.length} file]` : "";
       const badge = n.badge ? ` [${n.badge}]` : "";
-      return `  ${n.id}  (${n.kind}/${n.state})${badge}${figures}${files}  ${n.title}${after}`;
+      const provenance = n.provenance ? ` {${Object.entries(n.provenance).map(([k,v]) => `${k}=${v}`).join(", ")}}` : "";
+      return `  ${n.id}  (${n.kind}/${n.state})${badge}${figures}${files}  ${n.title}${after}${provenance}`;
     });
     const more = hits.length > shown.length ? `\n  … ${hits.length - shown.length} more` : "";
     return ok(summary(`${hits.length} match${hits.length === 1 ? "" : "es"}:\n${lines.join("\n")}${more}`));
@@ -714,9 +782,10 @@ server.registerTool(
       unit: z.string().optional(),
       caption: z.string().optional(),
       replace: z.boolean().optional(),
+      badge: z.enum(["value", "fraction", "percent"]).optional().describe("Derive and store a badge from the selected last value; fraction/percent use total source rows as denominator."),
     },
   },
-  async ({ node_id, path: source, kind, label_column, value_column, max_points, title, unit, caption, replace }) => {
+  async ({ node_id, path: source, kind, label_column, value_column, max_points, title, unit, caption, replace, badge }) => {
     const node = store.findNode(node_id);
     if (!node) throw new Error(`No node with id "${node_id}".`);
     const file = path.isAbsolute(source) ? source : path.resolve(projectDir, source);
@@ -739,6 +808,15 @@ server.registerTool(
       "svg",
       replace ?? false,
     );
+    if (badge) {
+      const value = selected.points.at(-1)!.value;
+      const formatted = badge === "value" ? `${value}` : badge === "fraction"
+        ? `${value} / ${selected.totalRows}`
+        : `${((value / selected.totalRows) * 100).toFixed(1)}%`;
+      store.upsertNode({ id: node_id, badge: formatted, derivedBadge: {
+        source: path.relative(projectDir, file), kind, valueColumn: selected.valueColumn, row: "last", format: badge,
+      } });
+    }
     await ensureViewer();
     return ok(summary(
       `Data chart attached to "${node_id}" from ${path.basename(file)}.`,
@@ -746,6 +824,43 @@ server.registerTool(
     ));
   },
 );
+
+server.registerTool("flow_retract", {
+  title: "Retract a result",
+  description: "Mark a node as retracted: its claim or measurement was wrong, distinct from a failed experiment.",
+  inputSchema: { node_id: z.string(), reason: z.string().min(1).max(200), replaced_by: z.string().optional() },
+}, async ({ node_id, reason, replaced_by }) => {
+  const node = store.findNode(node_id);
+  if (!node) throw new Error(`No node with id "${node_id}".`);
+  assertState(node.kind, "retracted");
+  if (replaced_by && !store.findNode(replaced_by)) throw new Error(`No replacement node with id "${replaced_by}".`);
+  store.upsertNode({ id: node_id, state: "retracted", bullets: [...node.bullets, `Retracted: ${reason}`, ...(replaced_by ? [`Replaced by ${replaced_by}`] : [])].slice(0, 12) });
+  if (replaced_by) store.addEdge(node_id, replaced_by, "superseded by", true);
+  await ensureViewer();
+  return ok(summary(`Retracted "${node_id}".`));
+});
+
+server.registerTool("flow_lineage", {
+  title: "Trace artifact provenance",
+  description: "Find a node by id, artifact name, output path, job id, or script and trace all incoming ancestors to origins.",
+  inputSchema: { query: z.string().min(1) },
+}, async ({ query }) => {
+  await ensureViewer();
+  const g = store.get();
+  const q = query.toLowerCase();
+  const targets = g.nodes.filter((n) => n.id.toLowerCase() === q || n.artifacts.some((a) => a.name.toLowerCase().includes(q)) || Object.values(n.provenance ?? {}).some((v) => v?.toLowerCase().includes(q)));
+  if (!targets.length) return ok(summary(`No provenance chain found for "${query}".`));
+  const lines: string[] = [];
+  const visit = (id: string, depth: number, seen: Set<string>) => {
+    if (seen.has(id)) return lines.push(`${"  ".repeat(depth)}↳ ${id} (cycle)`);
+    const n = g.nodes.find((x) => x.id === id); if (!n) return;
+    lines.push(`${"  ".repeat(depth)}${depth ? "↳ " : ""}${n.id}: ${n.title}`);
+    const next = new Set(seen); next.add(id);
+    for (const e of g.edges.filter((x) => x.to === id)) visit(e.from, depth + 1, next);
+  };
+  for (const target of targets) visit(target.id, 0, new Set());
+  return ok(summary(`Provenance chain for "${query}":\n${lines.join("\n")}`));
+});
 
 server.registerTool(
   "flow_remove",
@@ -817,6 +932,7 @@ server.registerTool(
     },
   },
   async ({ reopen, list_charts }) => {
+    refreshDerivedBadges();
     if (reopen) opened = false;
     const v = await ensureViewer();
     let extra = "";

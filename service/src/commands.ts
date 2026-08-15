@@ -104,3 +104,12 @@ export async function listCommands(pool: Pool, chartId: string, limit = 50): Pro
   );
   return r.rows;
 }
+
+export async function countPendingCommands(pool: Pool, chartId: string): Promise<number> {
+  const r = await pool.query<{ count: string }>(
+    `SELECT count(*)::text AS count FROM commands
+      WHERE chart_id = $1 AND status IN ('queued', 'claimed', 'running')`,
+    [chartId],
+  );
+  return Number(r.rows[0]?.count ?? 0);
+}

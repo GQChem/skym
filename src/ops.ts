@@ -33,6 +33,8 @@ export type Op =
       bullets?: string[];
       group?: string;
       badge?: string | null;
+      provenance?: import("./store.js").Provenance | null;
+      derivedBadge?: import("./store.js").DerivedBadge | null;
     }
   | { t: "node.state"; id: string; state: NodeState }
   | { t: "node.del"; id: string }
@@ -148,6 +150,10 @@ export function apply(graph: Graph, entry: Entry): Graph {
         if (op.group !== undefined) existing.group = op.group;
         if (op.badge === null) delete existing.badge;
         else if (op.badge !== undefined) existing.badge = op.badge;
+        if (op.provenance === null) delete existing.provenance;
+        else if (op.provenance !== undefined) existing.provenance = op.provenance;
+        if (op.derivedBadge === null) delete existing.derivedBadge;
+        else if (op.derivedBadge !== undefined) existing.derivedBadge = op.derivedBadge;
         existing.artifacts ??= [];
         existing.updatedAt = at;
       } else {
@@ -162,6 +168,8 @@ export function apply(graph: Graph, entry: Entry): Graph {
           figures: [],
           artifacts: [],
           badge: op.badge ?? undefined,
+          provenance: op.provenance ?? undefined,
+          derivedBadge: op.derivedBadge ?? undefined,
           createdAt: at,
           updatedAt: at,
         });
@@ -304,7 +312,7 @@ export function migrateGraphToLog(graph: Graph): Entry[] {
   push({ t: "init", title: graph.title, description: graph.description, direction: graph.direction });
   for (const n of graph.nodes) {
     push(
-      { t: "node.put", id: n.id, title: n.title, kind: n.kind, state: n.state, bullets: n.bullets, group: n.group, badge: n.badge },
+      { t: "node.put", id: n.id, title: n.title, kind: n.kind, state: n.state, bullets: n.bullets, group: n.group, badge: n.badge, provenance: n.provenance, derivedBadge: n.derivedBadge },
       n.createdAt || at,
     );
     for (const f of n.figures) push({ t: "figure.add", nodeId: n.id, figure: f }, n.updatedAt || at);

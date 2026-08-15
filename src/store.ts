@@ -43,6 +43,23 @@ export interface Artifact {
   label?: string;
 }
 
+export interface Provenance {
+  script?: string;
+  outputPath?: string;
+  jobId?: string;
+  date?: string;
+  commit?: string;
+}
+
+export interface DerivedBadge {
+  source: string;
+  kind?: "bar" | "line" | "stat";
+  valueColumn?: string;
+  totalColumn?: string;
+  row?: "first" | "last";
+  format?: "value" | "fraction" | "percent";
+}
+
 export interface FlowNode {
   id: string;
   title: string;
@@ -55,6 +72,8 @@ export interface FlowNode {
   artifacts: Artifact[];
   /** Compact cardinality, progress, or identifier marker shown on the card. */
   badge?: string;
+  provenance?: Provenance;
+  derivedBadge?: DerivedBadge;
   createdAt: number;
   updatedAt: number;
 }
@@ -391,6 +410,8 @@ export class GraphStore {
     direction: Direction = "TD",
     fresh = false,
     root?: string,
+    requestedId?: string,
+    strict = false,
   ): { graph: Graph; resumed: boolean } {
     if (root && path.resolve(root) !== path.resolve(this.root)) {
       // Moving to a different folder: drop the lock held under the old root.
@@ -398,7 +419,7 @@ export class GraphStore {
       this.root = path.resolve(root);
       fs.mkdirSync(path.join(this.root, "charts"), { recursive: true });
     }
-    const target = this.claimDir(title, fresh);
+    const target = requestedId ? this.claimById(requestedId, fresh) : this.claimDir(title, fresh, strict);
     const existing = fresh ? null : this.readGraphAt(target);
 
     this.chartId = target;
@@ -441,12 +462,23 @@ export class GraphStore {
     return readChartAt(path.join(this.root, "charts", chartId));
   }
 
+  private claimById(chartId: string, fresh: boolean): string {
+    if (!/^[a-zA-Z0-9][a-zA-Z0-9_-]{0,95}$/.test(chartId)) throw new Error("Invalid chart_id.");
+    this.sweepStaleLocks();
+    const existing = this.readGraphAt(chartId);
+    if (fresh && existing) throw new Error(`Chart "${chartId}" already exists.`);
+    if (!fresh && !existing) throw new Error(`No chart with chart_id "${chartId}".`);
+    if (this.isLocked(chartId)) throw new Error(`Chart "${chartId}" is in use by another session.`);
+    if (!(existing ? this.stealLock(chartId) : this.tryClaim(chartId))) throw new Error(`Could not claim chart "${chartId}".`);
+    return this.finish(path.join(this.root, "charts"), chartId);
+  }
+
   /**
    * Resolves the directory for this title: reuse it when the title matches,
    * otherwise take the next free numeric suffix. Also discards the throwaway
    * startup directory once the real name is known.
    */
-  private claimDir(title: string, fresh: boolean): string {
+  private claimDir(title: string, fresh: boolean, strict = false): string {
     const slug =
       title
         .toLowerCase()
@@ -464,9 +496,14 @@ export class GraphStore {
       const existing = this.readGraphAt(candidate);
       const held = this.isLocked(candidate);
 
+      if (strict && fresh && existing?.title === title) {
+        throw new Error(`A chart titled "${title}" already exists (chart_id: ${candidate}).`);
+      }
+
       // A live session owns this name — never join it.
       if (!held) {
         if (!existing) {
+          if (strict && !fresh) throw new Error(`No chart titled "${title}". Pass fresh:true to create it.`);
           // Unused name: take it atomically. Losing the race means someone
           // claimed it first, so fall through to the next suffix.
           if (this.tryClaim(candidate)) return this.finish(dir, candidate);
@@ -630,11 +667,48 @@ export class GraphStore {
     bullets?: string[];
     group?: string;
     badge?: string | null;
+    provenance?: Provenance | null;
+    derivedBadge?: DerivedBadge | null;
   }): Graph {
     // Only a new node counts against the ceiling; updates are always allowed,
     // or a full chart could not be corrected.
     checkNodeCeiling(this.graph, !this.findNode(input.id));
     return this.commit({ t: "node.put", ...input });
+  }
+
+  rename(title: string): Graph {
+    return this.commit({ t: "meta", title });
+  }
+
+  deleteChart(): void {
+    const target = path.resolve(this.chartDir);
+    if (path.dirname(target) !== path.resolve(this.root, "charts")) throw new Error("Refusing unsafe chart deletion.");
+    this.release();
+    fs.rmSync(target, { recursive: true, force: true });
+    this.dropFromIndex(this.chartId);
+    this.graph = emptyGraph(this.chartId, "Deleted chart");
+  }
+
+  mergeFrom(sourceId: string): { nodes: number; edges: number } {
+    if (sourceId === this.chartId) throw new Error("Cannot merge a chart into itself.");
+    const source = this.readGraphAt(sourceId);
+    if (!source) throw new Error(`No chart with chart_id "${sourceId}".`);
+    const ids = new Map<string, string>();
+    for (const n of source.nodes) {
+      const id = this.findNode(n.id) ? `${sourceId}-${n.id}` : n.id;
+      ids.set(n.id, id);
+      this.upsertNode({ id, title: n.title, kind: n.kind, state: n.state, bullets: n.bullets, group: n.group, badge: n.badge, provenance: n.provenance, derivedBadge: n.derivedBadge });
+      for (const figure of n.figures) {
+        const file = path.join(this.root, "charts", sourceId, "assets", figure.file);
+        if (fs.existsSync(file)) this.attachFigure(id, fs.readFileSync(file), figure.mime, figure.caption, path.extname(figure.file).slice(1));
+      }
+      for (const artifact of n.artifacts ?? []) {
+        const file = path.join(this.root, "charts", sourceId, "assets", artifact.file);
+        if (fs.existsSync(file)) this.attachArtifact(id, file, artifact.mime, artifact.label);
+      }
+    }
+    for (const e of source.edges) this.addEdge(ids.get(e.from)!, ids.get(e.to)!, e.label, e.dashed);
+    return { nodes: source.nodes.length, edges: source.edges.length };
   }
 
   removeNode(id: string): Graph {

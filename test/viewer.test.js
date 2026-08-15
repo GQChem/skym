@@ -66,3 +66,8 @@ test("every name imported from a shared module is actually exported", () => {
     }
   }
 });
+
+test("the node menu can queue an explanation", () => {
+  assert.match(app, /label: "Explain"/);
+  assert.match(app, /verb: "explain"/);
+});

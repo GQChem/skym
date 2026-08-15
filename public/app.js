@@ -382,6 +382,7 @@ let menuNode = null;
 
 const MENU_ITEMS = [
   { label: "Work on this", run: (n) => requestWork(n) },
+  { label: "Explain", run: (n) => requestExplain(n) },
   { label: "Copy node id", run: (n) => copy(n.id) },
   { label: "Copy node", run: (n) => copy(nodeAsText(n)) },
 ];
@@ -430,6 +431,26 @@ const requestWork = async (node) => {
     }),
   });
   if (!r.ok) throw new Error(`Could not queue command (${r.status})`);
+  return true;
+};
+
+const requestExplain = async (node) => {
+  const prompt = `Explain this chart node, including what it means, why it matters, and how it relates to its connected context.\n\n${promptFor(node)}`;
+  if (!state?.commandsEnabled) return copy(prompt);
+  const chartId = state.chartId || chartParam;
+  if (!chartId) throw new Error("No hosted chart selected");
+  const r = await fetch(`/api/charts/${encodeURIComponent(chartId)}/commands`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      node_id: node.id,
+      verb: "explain",
+      body: prompt,
+      idempotency_key: crypto.randomUUID(),
+    }),
+  });
+  if (!r.ok) throw new Error(`Could not queue explanation (${r.status})`);
+  await loadCommands();
   return true;
 };
 

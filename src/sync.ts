@@ -88,7 +88,7 @@ export interface RemoteCommand {
   nodeId: string | null;
   verb: string;
   body: string | null;
-  status: "claimed" | "running" | "done" | "failed";
+  status: "queued" | "claimed" | "running" | "done" | "failed" | "cancelled";
   createdAt: string;
   leaseExpiresAt: string | null;
 }
@@ -106,6 +106,8 @@ export class SyncClient {
 
   /** Last error, so `flow_show` can report a degraded sync without spamming. */
   lastError: string | null = null;
+  /** Hosted prompts that have not reached a terminal state. */
+  pendingCommands = 0;
 
   constructor(private opts: SyncOptions) {
     this.fetchImpl = opts.fetchImpl ?? fetch;
@@ -185,12 +187,32 @@ export class SyncClient {
     const out = await this.call<{ command: RemoteCommand | null }>(
       "POST", `/api/charts/${this.remoteChartId}/commands/claim`, {},
     );
+    await this.refreshPendingCommands().catch(() => null);
     return out.command;
   }
 
   async updateCommand(id: string, status: "running" | "done" | "failed", result?: string): Promise<RemoteCommand> {
     const out = await this.call<{ command: RemoteCommand }>("PATCH", `/api/commands/${id}`, { status, result });
+    await this.refreshPendingCommands().catch(() => null);
     return out.command;
+  }
+
+  /** Refresh the footer count without claiming or mutating any prompt. */
+  async refreshPendingCommands(): Promise<number> {
+    if (!this.remoteChartId) return this.pendingCommands = 0;
+    const out = await this.call<{ commands: RemoteCommand[]; pendingCount?: number }>("GET", `/api/charts/${this.remoteChartId}/commands`);
+    this.pendingCommands = out.pendingCount ?? out.commands.filter((command) =>
+      command.status === "queued" || command.status === "claimed" || command.status === "running"
+    ).length;
+    return this.pendingCommands;
+  }
+
+  /** Delete the attached hosted chart after the tool boundary confirmed its id. */
+  async deleteChart(): Promise<void> {
+    if (!this.remoteChartId) return;
+    await this.call("DELETE", `/api/charts/${this.remoteChartId}`);
+    this.remoteChartId = null;
+    this.pendingCommands = 0;
   }
 
   async flush(): Promise<void> {

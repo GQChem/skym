@@ -180,6 +180,14 @@ const RESULT: KindDef = {
       dark: { accent: "#d84559", fill: "#2b1c22", border: "#573039" },
     },
     {
+      slug: "retracted",
+      label: "retracted",
+      glyph: "↶",
+      blurb: "the reported claim or measurement was later found to be wrong",
+      light: { accent: "#7a4c9e", fill: "#faf5fd", border: "#d8c0e8" },
+      dark: { accent: "#b58bd2", fill: "#281d30", border: "#533b63" },
+    },
+    {
       slug: "mixed",
       label: "mixed",
       glyph: "~",

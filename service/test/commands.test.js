@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { randomUUID } from "node:crypto";
-import { claimCommand, createCommand, updateCommand } from "../dist/service/src/commands.js";
+import { claimCommand, countPendingCommands, createCommand, updateCommand } from "../dist/service/src/commands.js";
 import { makePool, migrate } from "../dist/service/src/db.js";
 
 const url = process.env.TEST_DATABASE_URL;
@@ -52,6 +52,15 @@ test("only the claiming agent can advance a command", { skip }, async () => {
   assert.equal(await updateCommand(pool, command.id, agentB, "running"), null);
   assert.equal((await updateCommand(pool, command.id, agentA, "running")).status, "running");
   assert.equal((await updateCommand(pool, command.id, agentA, "done", "finished")).status, "done");
+  assert.equal(await countPendingCommands(pool, chartId), 0);
+});
+
+test("pending count includes queued and in-progress commands", { skip }, async () => {
+  await pool.query("DELETE FROM commands WHERE chart_id = $1", [chartId]);
+  await createCommand(pool, { chartId, userId, body: "queued", idempotencyKey: randomUUID() });
+  await createCommand(pool, { chartId, userId, body: "claimed", idempotencyKey: randomUUID() });
+  await claimCommand(pool, chartId, agentA);
+  assert.equal(await countPendingCommands(pool, chartId), 2);
 });
 
 test("an expired lease can be recovered by another agent", { skip }, async () => {

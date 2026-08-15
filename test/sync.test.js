@@ -60,6 +60,17 @@ test("attach sends the resolved vocabulary to the hosted viewer", async () => {
   await c.close();
 });
 
+test("pending hosted prompts are counted independently of sync uploads", async () => {
+  const f = stubFetch(({ url }) => url.endsWith("/attach")
+    ? { body: { chartId: "remote-1" } }
+    : { body: { commands: [], pendingCount: 3 } });
+  const c = await client(f);
+  assert.equal(await c.refreshPendingCommands(), 3);
+  assert.equal(c.pendingCommands, 3);
+  assert.equal(c.pending, 0, "prompt count must not be confused with the outgoing sync queue");
+  await c.close();
+});
+
 test("enqueue never throws and never blocks", async () => {
   const f = stubFetch(() => ({ body: { chartId: "remote-1" } }));
   const c = await client(f);
@@ -511,5 +522,6 @@ test("hosted commands are claimed and advanced through the attached chart", asyn
   await c.attach({ slug: "local", title: "Commands" });
   assert.equal((await c.claimCommand()).id, command.id);
   assert.equal((await c.updateCommand(command.id, "done", "finished")).status, "done");
-  assert.deepEqual(f.calls.at(-1).body, { status: "done", result: "finished" });
+  const update = f.calls.find((call) => call.url.endsWith(`/api/commands/${command.id}`));
+  assert.deepEqual(update.body, { status: "done", result: "finished" });
 });

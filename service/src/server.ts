@@ -33,7 +33,7 @@ import { QuotaExceeded, findFigure, haveFigures, putFigure, removeBlob, usageFor
 import { tx } from "./db.js";
 import { recordAudit } from "./audit.js";
 import { deleteAccount, exportAccount } from "./account.js";
-import { cancelCommand, claimCommand, createCommand, listCommands, updateCommand } from "./commands.js";
+import { cancelCommand, claimCommand, countPendingCommands, createCommand, listCommands, updateCommand } from "./commands.js";
 import { applyStripeEvent, billingConfigured, constructStripeEvent, createCheckout, createPortal } from "./billing.js";
 import type { Entry } from "../../src/ops.js";
 
@@ -637,7 +637,10 @@ async function route({ pool, req, res, url }: Ctx): Promise<void> {
   if (commandCollection) {
     const chartId = commandCollection[1]!;
     if (!(await canAccessChart(pool, who.userId, chartId))) return json(res, 403, { error: "forbidden" });
-    if (method === "GET") return json(res, 200, { commands: await listCommands(pool, chartId) });
+    if (method === "GET") {
+      const [commands, pendingCount] = await Promise.all([listCommands(pool, chartId), countPendingCommands(pool, chartId)]);
+      return json(res, 200, { commands, pendingCount });
+    }
     if (method === "POST") {
       if (who.via !== "session") return json(res, 403, { error: "browser session required" });
       if (!(await canAccessChart(pool, who.userId, chartId, "write"))) return json(res, 403, { error: "forbidden" });
@@ -756,7 +759,6 @@ async function route({ pool, req, res, url }: Ctx): Promise<void> {
   const chartDelete = pathname.match(/^\/api\/charts\/([0-9a-f-]{36})$/i);
   if (chartDelete && method === "DELETE") {
     const chartId = chartDelete[1]!;
-    if (who.via !== "session") return json(res, 403, { error: "browser session required" });
     if (!(await canAccessChart(pool, who.userId, chartId, "delete"))) return json(res, 403, { error: "forbidden" });
     await deleteChart(pool, chartId, who.userId);
     return json(res, 200, { ok: true });

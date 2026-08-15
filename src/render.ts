@@ -95,10 +95,10 @@ function card(n: LaidOutNode, o: RenderOptions): string {
   y += n.metaHeight;
 
   for (const line of n.titleLines) {
-    y += type.titleLeading;
+    y += n.titleLeading;
     parts.push(
       `<text class="skym-title" x="${left}" y="${(y - 4).toFixed(1)}" fill="${palette.ink}" ` +
-        `font-size="${type.titleSize}" font-weight="${type.titleWeight}">${esc(line)}</text>`,
+        `font-size="${n.titleSize}" font-weight="${type.titleWeight}">${esc(line)}</text>`,
     );
   }
 
