@@ -375,29 +375,44 @@ export function layoutGraph(
 
   dagre.layout(g);
 
-  // Dagre aligns the centres of nodes in a rank. When sibling cards have
-  // different heights that staggers their top edges and makes arrows into the
-  // shorter cards look much longer. Align the leading edge of every rank
-  // instead; edges are routed from these adjusted card bounds below.
-  const rankBuckets = new Map<number, LaidOutNode[]>();
+  // Keep Dagre's compact placement for unrelated branches. Only direct
+  // siblings in the same generation share a leading edge; chart-wide rank
+  // alignment wastes space by making independent subtrees obey each other.
+  const nodeRanks = new Map<string, number>();
   for (const m of measured) {
     const pos = g.node(m.id);
     if (!pos) continue;
     m.x = pos.x - m.w / 2;
     m.y = pos.y - m.h / 2;
-    const rank = Math.round(vertical ? pos.y : pos.x);
-    const bucket = rankBuckets.get(rank) ?? [];
-    bucket.push(m);
-    rankBuckets.set(rank, bucket);
+    nodeRanks.set(m.id, Math.round(vertical ? pos.y : pos.x));
   }
-  for (const members of rankBuckets.values()) {
-    if (members.length < 2) continue;
-    if (vertical) {
-      const top = Math.min(...members.map((m) => m.y));
-      for (const m of members) m.y = top;
-    } else {
-      const left = Math.min(...members.map((m) => m.x));
-      for (const m of members) m.x = left;
+
+  const childrenByParent = new Map<string, LaidOutNode[]>();
+  for (const edge of graph.edges) {
+    const child = byId.get(edge.to);
+    if (!child || !byId.has(edge.from)) continue;
+    const children = childrenByParent.get(edge.from) ?? [];
+    if (!children.includes(child)) children.push(child);
+    childrenByParent.set(edge.from, children);
+  }
+  for (const children of childrenByParent.values()) {
+    const byGeneration = new Map<number, LaidOutNode[]>();
+    for (const child of children) {
+      const rank = nodeRanks.get(child.id);
+      if (rank === undefined) continue;
+      const peers = byGeneration.get(rank) ?? [];
+      peers.push(child);
+      byGeneration.set(rank, peers);
+    }
+    for (const siblings of byGeneration.values()) {
+      if (siblings.length < 2) continue;
+      if (vertical) {
+        const top = Math.min(...siblings.map((m) => m.y));
+        for (const sibling of siblings) sibling.y = top;
+      } else {
+        const left = Math.min(...siblings.map((m) => m.x));
+        for (const sibling of siblings) sibling.x = left;
+      }
     }
   }
 

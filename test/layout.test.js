@@ -211,6 +211,23 @@ test("children with different heights align along their top edge", () => {
   assert.ok(gap <= DEFAULT_THEME.layout.rankGap, "short sibling must not create an artificially long arrow");
 });
 
+test("unrelated nodes in the same generation keep independent compact positions", () => {
+  const nodes = [
+    node({ id: "root-a" }),
+    node({ id: "root-b" }),
+    node({ id: "short", title: "Short" }),
+    node({ id: "tall", title: "Tall", bullets: ["one", "two", "three", "four"] }),
+  ];
+  const edges = [
+    { id: "e1", from: "root-a", to: "short", dashed: false },
+    { id: "e2", from: "root-b", to: "tall", dashed: false },
+  ];
+  const out = layoutGraph(graph(nodes, edges), DEFAULT_THEME, dagre, false);
+  const short = out.nodes.find((item) => item.id === "short");
+  const tall = out.nodes.find((item) => item.id === "tall");
+  assert.notEqual(short.y, tall.y, "unrelated branches should not be forced onto a shared top edge");
+});
+
 test("an arrow path reaches the destination card border", () => {
   const out = layoutGraph(
     graph([node({ id: "a" }), node({ id: "b" })], [{ id: "e", from: "a", to: "b", dashed: false }]),
