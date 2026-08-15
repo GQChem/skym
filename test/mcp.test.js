@@ -54,7 +54,7 @@ test("exposes the expected tool surface", async () => {
   try {
     const names = (await s.client.listTools()).tools.map((t) => t.name).sort();
     assert.deepEqual(names, [
-      "flow_action", "flow_chart", "flow_command_state", "flow_data", "flow_delete", "flow_edge", "flow_figure", "flow_file", "flow_find", "flow_inbox",
+      "flow_action", "flow_chart", "flow_command_state", "flow_comment", "flow_data", "flow_delete", "flow_edge", "flow_figure", "flow_file", "flow_find", "flow_inbox",
       "flow_init", "flow_lineage", "flow_merge", "flow_note", "flow_options", "flow_remove", "flow_rename", "flow_result", "flow_retract",
       "flow_show", "flow_state",
     ]);
@@ -147,6 +147,22 @@ test("builds a tree and reports state counts", async () => {
 
     const shown = text(await call("flow_show", {}));
     assert.ok(shown.includes("n_a --> n_b"), "after: should draw the edge");
+  } finally {
+    await s.client.close();
+  }
+});
+
+test("an agent can append user guidance without replacing node content", async () => {
+  const s = await boot();
+  try {
+    const call = (name, args) => s.client.callTool({ name, arguments: args });
+    await call("flow_init", { title: "Guidance" });
+    await call("flow_action", { id: "deploy", title: "Deploy", bullets: ["Use staging first"] });
+    const added = await call("flow_comment", { node_id: "deploy", comment: "Run only after approval" });
+    assert.match(text(added), /Comment appended/);
+    const shown = text(await call("flow_show", {}));
+    assert.match(shown, /Use staging first/);
+    assert.match(shown, /Run only after approval/);
   } finally {
     await s.client.close();
   }

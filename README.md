@@ -44,6 +44,7 @@ Node bodies are concise bullets. The server rejects prose-shaped bullets, states
 | `flow_find` | Search the chart by text, kind, or state — for resuming one you did not build. |
 | `flow_lineage` | Find an artifact/output/job and trace its incoming provenance chain to the origins. |
 | `flow_state` | Move a node to a new state as work progresses. |
+| `flow_comment` | Append user guidance or a usage note without replacing the node's existing body. |
 | `flow_edge` | Link nodes when the relation is not a simple follow-on. |
 | `flow_chart` | Draw a chart from data — no image generation, styled to match the cards. |
 | `flow_data` | Point at CSV/TSV/JSON; skym reads it locally and uploads only a generated SVG. |

@@ -276,7 +276,7 @@ export type DagreLike = {
  * Rounded orthogonal routing: dagre gives a polyline through rank channels,
  * which we square off and fillet so edges read as circuitry rather than noodles.
  */
-function orthogonalPath(points: { x: number; y: number }[], radius: number, vertical: boolean): string {
+function orthogonalPath(points: { x: number; y: number }[], radius: number, vertical: boolean, sharedMid?: number): string {
   if (points.length < 2) return "";
   const start = points[0];
   const end = points[points.length - 1];
@@ -287,7 +287,7 @@ function orthogonalPath(points: { x: number; y: number }[], radius: number, vert
   }
 
   // Single elbow at the midpoint of the travel axis.
-  const mid = vertical ? (start.y + end.y) / 2 : (start.x + end.x) / 2;
+  const mid = sharedMid ?? (vertical ? (start.y + end.y) / 2 : (start.x + end.x) / 2);
   const r = Math.min(
     radius,
     Math.abs(vertical ? end.x - start.x : end.y - start.y) / 2,
@@ -388,31 +388,67 @@ export function layoutGraph(
   }
 
   const childrenByParent = new Map<string, LaidOutNode[]>();
+  const parentsByChild = new Map<string, LaidOutNode[]>();
   for (const edge of graph.edges) {
     const child = byId.get(edge.to);
-    if (!child || !byId.has(edge.from)) continue;
+    const parent = byId.get(edge.from);
+    if (!child || !parent) continue;
     const children = childrenByParent.get(edge.from) ?? [];
     if (!children.includes(child)) children.push(child);
     childrenByParent.set(edge.from, children);
+    const parents = parentsByChild.get(edge.to) ?? [];
+    if (!parents.includes(parent)) parents.push(parent);
+    parentsByChild.set(edge.to, parents);
   }
-  for (const children of childrenByParent.values()) {
+
+  // Union peer sets so alignment works in both directions: one parent with
+  // several children, and several parents converging on one child.
+  const leaders = new Map<string, string>();
+  const find = (id: string): string => {
+    const leader = leaders.get(id) ?? id;
+    if (leader === id) return id;
+    const root = find(leader);
+    leaders.set(id, root);
+    return root;
+  };
+  const union = (a: string, b: string) => {
+    const ra = find(a);
+    const rb = find(b);
+    if (ra !== rb) leaders.set(rb, ra);
+  };
+  for (const peers of [...childrenByParent.values(), ...parentsByChild.values()]) {
     const byGeneration = new Map<number, LaidOutNode[]>();
-    for (const child of children) {
-      const rank = nodeRanks.get(child.id);
+    for (const peer of peers) {
+      const rank = nodeRanks.get(peer.id);
       if (rank === undefined) continue;
-      const peers = byGeneration.get(rank) ?? [];
-      peers.push(child);
-      byGeneration.set(rank, peers);
+      const generation = byGeneration.get(rank) ?? [];
+      generation.push(peer);
+      byGeneration.set(rank, generation);
     }
-    for (const siblings of byGeneration.values()) {
-      if (siblings.length < 2) continue;
-      if (vertical) {
-        const top = Math.min(...siblings.map((m) => m.y));
-        for (const sibling of siblings) sibling.y = top;
-      } else {
-        const left = Math.min(...siblings.map((m) => m.x));
-        for (const sibling of siblings) sibling.x = left;
-      }
+    for (const generation of byGeneration.values()) {
+      for (let i = 1; i < generation.length; i++) union(generation[0].id, generation[i].id);
+    }
+  }
+  // Separate trees share only their starting line; their descendants remain
+  // independently compact unless an actual sibling/co-parent relation joins them.
+  const childIds = new Set(graph.edges.map((edge) => edge.to));
+  const roots = measured.filter((node) => !childIds.has(node.id));
+  for (let i = 1; i < roots.length; i++) union(roots[0].id, roots[i].id);
+  const alignmentGroups = new Map<string, LaidOutNode[]>();
+  for (const m of measured) {
+    const root = find(m.id);
+    const peers = alignmentGroups.get(root) ?? [];
+    peers.push(m);
+    alignmentGroups.set(root, peers);
+  }
+  for (const peers of alignmentGroups.values()) {
+    if (peers.length < 2) continue;
+    if (vertical) {
+      const top = Math.min(...peers.map((m) => m.y));
+      for (const peer of peers) peer.y = top;
+    } else {
+      const left = Math.min(...peers.map((m) => m.x));
+      for (const peer of peers) peer.x = left;
     }
   }
 
@@ -421,19 +457,41 @@ export function layoutGraph(
     const a = byId.get(e.from);
     const b = byId.get(e.to);
     if (!a || !b) continue;
-    const points = anchorPoints(a, b, vertical);
+    const outgoing = childrenByParent.get(e.from) ?? [];
+    const incoming = parentsByChild.get(e.to) ?? [];
+    const fanOut = outgoing.filter((n) => nodeRanks.get(n.id) === nodeRanks.get(b.id)).length > 1;
+    const fanIn = incoming.filter((n) => nodeRanks.get(n.id) === nodeRanks.get(a.id)).length > 1;
+    const points = anchorPoints(a, b, vertical, fanOut || fanIn);
+    let bus: number | undefined;
+    if (fanOut) {
+      const target = anchorPoints(a, outgoing.find((n) => nodeRanks.get(n.id) === nodeRanks.get(b.id))!, vertical, true)[1];
+      bus = vertical ? (points[0].y + target.y) / 2 : (points[0].x + target.x) / 2;
+    } else if (fanIn) {
+      const sourceFaces = incoming
+        .filter((n) => nodeRanks.get(n.id) === nodeRanks.get(a.id))
+        .map((n) => anchorPoints(n, b, vertical, true)[0]);
+      if (vertical) {
+        const towardDown = points[1].y >= points[0].y;
+        const boundary = towardDown ? Math.max(...sourceFaces.map((p) => p.y)) : Math.min(...sourceFaces.map((p) => p.y));
+        bus = (boundary + points[1].y) / 2;
+      } else {
+        const towardRight = points[1].x >= points[0].x;
+        const boundary = towardRight ? Math.max(...sourceFaces.map((p) => p.x)) : Math.min(...sourceFaces.map((p) => p.x));
+        bus = (boundary + points[1].x) / 2;
+      }
+    }
     // The label belongs on the run the elbow actually travels, offset off the
     // stroke so it never sits on top of a neighbouring edge.
     const mid = vertical
-      ? { x: points[1].x, y: (points[0].y + points[1].y) / 2 + theme.layout.edgeRadius }
-      : { x: (points[0].x + points[1].x) / 2 + theme.layout.edgeRadius, y: points[1].y };
+      ? { x: points[1].x, y: (bus ?? (points[0].y + points[1].y) / 2) + theme.layout.edgeRadius }
+      : { x: (bus ?? (points[0].x + points[1].x) / 2) + theme.layout.edgeRadius, y: points[1].y };
     laidOutEdges.push({
       id: e.id,
       from: e.from,
       to: e.to,
       label: e.label,
       dashed: e.dashed,
-      path: orthogonalPath(points, theme.layout.edgeRadius, vertical),
+      path: orthogonalPath(points, theme.layout.edgeRadius, vertical, bus),
       labelPos: e.label ? mid : undefined,
     });
   }
@@ -474,6 +532,7 @@ function anchorPoints(
   a: LaidOutNode,
   b: LaidOutNode,
   vertical: boolean,
+  centered = false,
 ): { x: number; y: number }[] {
   const ac = { x: a.x + a.w / 2, y: a.y + a.h / 2 };
   const bc = { x: b.x + b.w / 2, y: b.y + b.h / 2 };
@@ -482,7 +541,7 @@ function anchorPoints(
     const down = bc.y >= ac.y;
     // Keep the exit inside the card's own width, biased toward the target.
     const inset = Math.min(a.w / 2 - 12, Math.abs(bc.x - ac.x) / 2);
-    const exitX = ac.x + Math.sign(bc.x - ac.x) * Math.max(0, inset);
+    const exitX = centered ? ac.x : ac.x + Math.sign(bc.x - ac.x) * Math.max(0, inset);
     return [
       { x: exitX, y: down ? a.y + a.h : a.y },
       { x: bc.x, y: down ? b.y : b.y + b.h },
@@ -491,7 +550,7 @@ function anchorPoints(
 
   const right = bc.x >= ac.x;
   const inset = Math.min(a.h / 2 - 10, Math.abs(bc.y - ac.y) / 2);
-  const exitY = ac.y + Math.sign(bc.y - ac.y) * Math.max(0, inset);
+  const exitY = centered ? ac.y : ac.y + Math.sign(bc.y - ac.y) * Math.max(0, inset);
   return [
     { x: right ? a.x + a.w : a.x, y: exitY },
     { x: right ? b.x : b.x + b.w, y: bc.y },

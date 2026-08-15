@@ -514,6 +514,29 @@ function registerKindTool(kind: KindDef): void {
 for (const kind of vocab.kinds) registerKindTool(kind);
 
 server.registerTool(
+  "flow_comment",
+  {
+    title: "Append guidance to a node",
+    description:
+      "Append a concise note to an existing node without replacing its current body. Use this when the user specifies how a node should be interpreted or used.",
+    inputSchema: {
+      node_id: z.string().describe("Node receiving the note."),
+      comment: z.string().min(1).max(200).describe("One concise usage note or comment."),
+    },
+  },
+  async ({ node_id, comment }) => {
+    const node = store.findNode(node_id);
+    if (!node) throw new Error(`No node with id "${node_id}".`);
+    const bullets = [...node.bullets, comment];
+    if (bullets.length > 12) throw new Error(`Node "${node_id}" already has the maximum 12 body items.`);
+    validateBullets([comment]);
+    store.upsertNode({ id: node_id, bullets });
+    await ensureViewer();
+    return ok(summary(`Comment appended to "${node_id}".`));
+  },
+);
+
+server.registerTool(
   "flow_state",
   {
     title: "Update a node's state",

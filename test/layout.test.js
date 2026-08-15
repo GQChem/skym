@@ -228,6 +228,56 @@ test("unrelated nodes in the same generation keep independent compact positions"
   assert.notEqual(short.y, tall.y, "unrelated branches should not be forced onto a shared top edge");
 });
 
+test("parents converging on one child align along their top edge", () => {
+  const nodes = [
+    node({ id: "short-parent", title: "Short" }),
+    node({ id: "tall-parent", title: "Tall", bullets: ["one", "two", "three"] }),
+    node({ id: "join", title: "Join" }),
+  ];
+  const edges = [
+    { id: "e1", from: "short-parent", to: "join", dashed: false },
+    { id: "e2", from: "tall-parent", to: "join", dashed: false },
+  ];
+  const out = layoutGraph(graph(nodes, edges), DEFAULT_THEME, dagre, false);
+  const short = out.nodes.find((item) => item.id === "short-parent");
+  const tall = out.nodes.find((item) => item.id === "tall-parent");
+  assert.equal(short.y, tall.y, "co-parents should start on the same horizontal line");
+});
+
+test("roots of disconnected trees share a top edge", () => {
+  const nodes = [
+    node({ id: "root-a", title: "Short root" }),
+    node({ id: "root-b", title: "Tall root", bullets: ["one", "two", "three"] }),
+    node({ id: "child-a" }),
+    node({ id: "child-b" }),
+  ];
+  const edges = [
+    { id: "e1", from: "root-a", to: "child-a", dashed: false },
+    { id: "e2", from: "root-b", to: "child-b", dashed: false },
+  ];
+  const out = layoutGraph(graph(nodes, edges), DEFAULT_THEME, dagre, false);
+  assert.equal(
+    out.nodes.find((item) => item.id === "root-a").y,
+    out.nodes.find((item) => item.id === "root-b").y,
+  );
+});
+
+test("fan-out edges share one trunk before branching", () => {
+  const nodes = [node({ id: "parent" }), ...["a", "b", "c", "d"].map((id) => node({ id }))];
+  const edges = ["a", "b", "c", "d"].map((to, i) => ({ id: `e${i}`, from: "parent", to, dashed: false }));
+  const out = layoutGraph(graph(nodes, edges), DEFAULT_THEME, dagre, false);
+  const trunks = out.edges.map((edge) => edge.path.match(/^M[^ ]+ L[^ ]+/)?.[0]);
+  assert.equal(new Set(trunks).size, 1, "fan-out paths should overlap as one initial trunk");
+});
+
+test("fan-in edges share one final trunk into the join", () => {
+  const nodes = [...["a", "b", "c", "d"].map((id) => node({ id })), node({ id: "join" })];
+  const edges = ["a", "b", "c", "d"].map((from, i) => ({ id: `e${i}`, from, to: "join", dashed: false }));
+  const out = layoutGraph(graph(nodes, edges), DEFAULT_THEME, dagre, false);
+  const trunks = out.edges.map((edge) => edge.path.match(/Q[^ ]+ [^ ]+ L[^ ]+$/)?.[0]);
+  assert.equal(new Set(trunks).size, 1, "fan-in paths should overlap as one final trunk");
+});
+
 test("an arrow path reaches the destination card border", () => {
   const out = layoutGraph(
     graph([node({ id: "a" }), node({ id: "b" })], [{ id: "e", from: "a", to: "b", dashed: false }]),
