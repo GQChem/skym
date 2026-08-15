@@ -69,7 +69,7 @@ test("more bullets make a taller card", () => {
 });
 
 test("the default theme keeps charts deliberately dense", () => {
-  assert.ok(DEFAULT_THEME.layout.rankGap <= 30);
+  assert.ok(DEFAULT_THEME.layout.rankGap <= 12);
   assert.ok(DEFAULT_THEME.layout.nodeGap <= 14);
   assert.ok(DEFAULT_THEME.card.padX <= 12);
   assert.ok(DEFAULT_THEME.card.padY <= 9);
@@ -182,6 +182,13 @@ test("edges produce a drawable path", () => {
   );
   assert.match(out.edges[0].path, /^M[\d.]+,[\d.]+/);
   assert.ok(!out.edges[0].path.includes("NaN"));
+});
+
+test("vertical parent-child ranks stay tightly stacked", () => {
+  const nodes = [node({ id: "a" }), node({ id: "b" })];
+  const out = layoutGraph(graph(nodes, [{ id: "e", from: "a", to: "b", dashed: false }]), DEFAULT_THEME, dagre, false);
+  const [a, b] = nodes.map(({ id }) => out.nodes.find((item) => item.id === id));
+  assert.ok(b.y - (a.y + a.h) <= 12, "vertical rank gap exceeded the compact default");
 });
 
 test("an arrow path reaches the destination card border", () => {

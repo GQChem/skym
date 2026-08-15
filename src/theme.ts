@@ -110,9 +110,9 @@ export const DEFAULT_THEME: Theme = {
     metaTracking: 0.07,
   },
   layout: {
-    rankGap: 30,
+    rankGap: 12,
     nodeGap: 14,
-    edgeRadius: 10,
+    edgeRadius: 6,
     edgeWidth: 1.5,
     arrow: 7,
   },

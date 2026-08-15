@@ -319,8 +319,8 @@ function orthogonalPath(points: { x: number; y: number }[], radius: number, vert
   ].join(" ");
 }
 
-const CLUSTER_PAD = 18;
-const CLUSTER_HEAD = 18;
+const CLUSTER_PAD = 12;
+const CLUSTER_HEAD = 16;
 const CANVAS_MARGIN = 10;
 
 export function layoutGraph(
