@@ -73,11 +73,9 @@
         <div class="steps">
           <div class="step">
             <div>
-              <h3>Build it and add the MCP server</h3>
-              <p>Clone the repo, build once, then point Claude Code at the build. Copy <code>CLAUDE.md.example</code> into your project's <code>CLAUDE.md</code> — the tools stay idle unless Claude is told to call them.</p>
-              <pre class="code">git clone https://github.com/GQChem/skym &amp;&amp; cd skym
-npm install &amp;&amp; npm run build
-claude mcp add skym-flow -- node "$PWD/dist/index.js"</pre>
+              <h3>Add the MCP server</h3>
+              <p>Run the published package directly from npm. Then copy <a href="https://github.com/GQChem/skym/blob/main/CLAUDE.md.example"><code>CLAUDE.md.example</code></a> into your project's <code>CLAUDE.md</code> — the tools stay idle unless Claude is told to call them.</p>
+              <pre class="code">claude mcp add skym-flow -- npx --yes skym-flow@latest</pre>
             </div>
           </div>
           <div class="step">
