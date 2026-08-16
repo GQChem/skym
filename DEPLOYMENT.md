@@ -154,11 +154,10 @@ The public npm package contains the MIT-licensed local MCP client and viewer;
 the proprietary `service/` workspace is private and is not packed.
 
 1. Create an npm account with two-factor authentication.
-2. Confirm the unscoped name is available:
-   `npm view skym-flow`. If it is owned by someone else, rename the package to
-   an available scoped name such as `@YOUR_SCOPE/skym-flow` before publishing.
+2. Confirm access to the existing package with `npm view skym-flow` and
+   `npm whoami`.
 3. Run `npm ci`, `npm test`, and `npm pack --dry-run` from the repository root.
-4. For the first release, run `npm login`, then `npm publish`.
+4. Increment the version, run `npm login`, then `npm publish`.
 5. In npmjs.com → package → **Settings → Trusted publishing**, connect the
    GitHub repository and a tag-triggered publish workflow. Give that workflow
    only `contents: read` and `id-token: write` permissions.
@@ -170,11 +169,10 @@ confirmed.
 
 ## 8. Local installation and pairing smoke test
 
-After npm publication:
+Test the published package without a global installation:
 
 ```powershell
-npm install --global skym-flow
-claude mcp add skym-flow -- skym-flow
+claude mcp add skym-flow -- npx --yes skym-flow@latest
 ```
 
 Copy `CLAUDE.md.example` into a disposable test project, start Claude Code,

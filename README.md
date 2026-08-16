@@ -8,13 +8,21 @@ Each chat gets its own chart, saved in the project under `.flows/`.
 
 ## Install
 
+Add the published MCP server directly from npm (Node.js 18+):
+
 ```bash
-npm install
-npm run build
-claude mcp add skym-flow -- node "<abs-path>/dist/index.js"
+claude mcp add skym-flow -- npx --yes skym-flow@latest
 ```
 
-Then copy `CLAUDE.md.example` into your project's `CLAUDE.md` — the tools do nothing unless Claude is told to call them.
+The required [CLAUDE.md.example](https://github.com/GQChem/skym/blob/main/CLAUDE.md.example) is also included in the npm package. Copy it into your project as `CLAUDE.md`; the tools do nothing unless Claude is told to call them.
+
+To work on skym-flow itself instead, clone this repository and run:
+
+```bash
+npm install
+npm test
+claude mcp add skym-flow-dev -- node "<absolute-repo-path>/dist/index.js"
+```
 
 ## The model
 
