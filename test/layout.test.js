@@ -240,7 +240,7 @@ test("children with different heights align along their top edge", () => {
   assert.ok(gap <= DEFAULT_THEME.layout.rankGap, "short sibling must not create an artificially long arrow");
 });
 
-test("unrelated nodes in the same generation keep independent compact positions", () => {
+test("unrelated trees compact their ranks independently", () => {
   const nodes = [
     node({ id: "root-a" }),
     node({ id: "root-b" }),
@@ -252,9 +252,11 @@ test("unrelated nodes in the same generation keep independent compact positions"
     { id: "e2", from: "root-b", to: "tall", dashed: false },
   ];
   const out = layoutGraph(graph(nodes, edges), DEFAULT_THEME, dagre, false);
-  const short = out.nodes.find((item) => item.id === "short");
-  const tall = out.nodes.find((item) => item.id === "tall");
-  assert.notEqual(short.y, tall.y, "unrelated branches should not be forced onto a shared top edge");
+  for (const [rootId, childId] of [["root-a", "short"], ["root-b", "tall"]]) {
+    const root = out.nodes.find((item) => item.id === rootId);
+    const child = out.nodes.find((item) => item.id === childId);
+    assert.equal(child.y - (root.y + root.h), DEFAULT_THEME.layout.rankGap);
+  }
 });
 
 test("parents converging on one child align along their top edge", () => {
@@ -347,6 +349,32 @@ test("disconnected trees have equal horizontal spacing", () => {
     .sort((a, b) => a.left - b.left);
   const gaps = bounds.slice(1).map((bound, i) => bound.left - bounds[i].right);
   assert.deepEqual(gaps, [DEFAULT_THEME.layout.nodeGap, DEFAULT_THEME.layout.nodeGap]);
+});
+
+test("a tall disconnected tree does not lengthen another tree's arrows", () => {
+  const nodes = [
+    node({ id: "short-root" }), node({ id: "short-child" }),
+    node({ id: "tall-root", bullets: ["one", "two", "three", "four", "five", "six"] }),
+    node({ id: "tall-child" }),
+  ];
+  const edges = [
+    { id: "short-edge", from: "short-root", to: "short-child", dashed: false },
+    { id: "tall-edge", from: "tall-root", to: "tall-child", dashed: false },
+  ];
+  const out = layoutGraph(graph(nodes, edges), DEFAULT_THEME, dagre, false);
+  const root = out.nodes.find((item) => item.id === "short-root");
+  const child = out.nodes.find((item) => item.id === "short-child");
+  assert.equal(child.y - (root.y + root.h), DEFAULT_THEME.layout.rankGap);
+});
+
+test("disconnected group frames do not overlap", () => {
+  const nodes = [
+    node({ id: "a", group: "first" }),
+    node({ id: "b", group: "second" }),
+  ];
+  const out = layoutGraph(graph(nodes, []), DEFAULT_THEME, dagre, false);
+  const clusters = [...out.clusters].sort((a, b) => a.x - b.x);
+  assert.equal(clusters[1].x - (clusters[0].x + clusters[0].w), DEFAULT_THEME.layout.nodeGap);
 });
 
 test("fan-out edges share one trunk before branching", () => {

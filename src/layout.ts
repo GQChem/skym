@@ -489,11 +489,65 @@ export function layoutGraph(
     }
   }
 
+  // Dagre shares rank heights across the entire graph, including disconnected
+  // trees. Compact each tree's ranks independently so a tall card in one tree
+  // cannot give another tree needlessly long arrows.
+  const primaryStart = (node: LaidOutNode) => {
+    if (graph.direction === "TD") return node.y;
+    if (graph.direction === "BT") return -(node.y + node.h);
+    if (graph.direction === "LR") return node.x;
+    return -(node.x + node.w);
+  };
+  const primarySize = (node: LaidOutNode) => vertical ? node.h : node.w;
+  const movePrimary = (node: LaidOutNode, delta: number) => {
+    const physical = graph.direction === "BT" || graph.direction === "RL" ? -delta : delta;
+    if (vertical) node.y += physical;
+    else node.x += physical;
+  };
+  for (const component of components) {
+    const ranks = new Map<number, LaidOutNode[]>();
+    for (const node of component) {
+      const rank = nodeRanks.get(node.id);
+      if (rank === undefined) continue;
+      const peers = ranks.get(rank) ?? [];
+      peers.push(node);
+      ranks.set(rank, peers);
+    }
+    const ordered = [...ranks.values()].sort((a, b) => primaryStart(a[0]) - primaryStart(b[0]));
+    let cursor: number | undefined;
+    let previous: LaidOutNode[] | undefined;
+    for (const rank of ordered) {
+      const start = Math.min(...rank.map(primaryStart));
+      if (cursor !== undefined) {
+        const previousGroups = new Set(previous!.map((node) => node.node.group).filter(Boolean));
+        const currentGroups = new Set(rank.map((node) => node.node.group).filter(Boolean));
+        const leavesGroup = [...previousGroups].some((group) => !currentGroups.has(group));
+        const entersGroup = [...currentGroups].some((group) => !previousGroups.has(group));
+        const frameClearance = (leavesGroup ? CLUSTER_PAD : 0) +
+          (entersGroup ? CLUSTER_PAD + (vertical ? CLUSTER_HEAD : 0) : 0);
+        const delta = cursor + theme.layout.rankGap + frameClearance - start;
+        for (const node of rank) movePrimary(node, delta);
+      }
+      cursor = Math.max(...rank.map((node) => primaryStart(node) + primarySize(node)));
+      previous = rank;
+    }
+  }
+
   // Dagre lays disconnected components out together, which can leave uneven
-  // whitespace between them. Pack whole trees after every alignment adjustment
-  // so their bounding boxes have one predictable gap and cannot overlap.
-  const crossStart = (component: LaidOutNode[]) => Math.min(...component.map((node) => vertical ? node.x : node.y));
-  const crossEnd = (component: LaidOutNode[]) => Math.max(...component.map((node) => vertical ? node.x + node.w : node.y + node.h));
+  // whitespace between them. Include group frames in each tree's visible bounds,
+  // then pack the complete shapes with one predictable gap.
+  const crossBounds = (component: LaidOutNode[]) => {
+    let start = Math.min(...component.map((node) => vertical ? node.x : node.y));
+    let end = Math.max(...component.map((node) => vertical ? node.x + node.w : node.y + node.h));
+    const grouped = component.filter((node) => node.node.group);
+    if (grouped.length) {
+      start = Math.min(start, ...grouped.map((node) => (vertical ? node.x : node.y) - CLUSTER_PAD - (vertical ? 0 : CLUSTER_HEAD)));
+      end = Math.max(end, ...grouped.map((node) => (vertical ? node.x + node.w : node.y + node.h) + CLUSTER_PAD));
+    }
+    return { start, end };
+  };
+  const crossStart = (component: LaidOutNode[]) => crossBounds(component).start;
+  const crossEnd = (component: LaidOutNode[]) => crossBounds(component).end;
   components.sort((a, b) => crossStart(a) - crossStart(b));
   let crossCursor: number | undefined;
   for (const component of components) {
