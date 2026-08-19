@@ -429,22 +429,6 @@ export function layoutGraph(
       else node.x += delta;
     }
   }
-  const crossStart = (component: LaidOutNode[]) => Math.min(...component.map((node) => vertical ? node.x : node.y));
-  const crossEnd = (component: LaidOutNode[]) => Math.max(...component.map((node) => vertical ? node.x + node.w : node.y + node.h));
-  components.sort((a, b) => crossStart(a) - crossStart(b));
-  let crossCursor = Number.NEGATIVE_INFINITY;
-  for (const component of components) {
-    const start = crossStart(component);
-    const shift = Number.isFinite(crossCursor) ? Math.max(0, crossCursor + theme.layout.nodeGap - start) : 0;
-    if (shift) {
-      for (const node of component) {
-        if (vertical) node.x += shift;
-        else node.y += shift;
-      }
-    }
-    crossCursor = crossEnd(component);
-  }
-
   const childrenByParent = new Map<string, LaidOutNode[]>();
   const parentsByChild = new Map<string, LaidOutNode[]>();
   for (const edge of graph.edges) {
@@ -503,6 +487,22 @@ export function layoutGraph(
       const left = Math.min(...peers.map((m) => m.x));
       for (const peer of peers) peer.x = left;
     }
+  }
+
+  // Dagre lays disconnected components out together, which can leave uneven
+  // whitespace between them. Pack whole trees after every alignment adjustment
+  // so their bounding boxes have one predictable gap and cannot overlap.
+  const crossStart = (component: LaidOutNode[]) => Math.min(...component.map((node) => vertical ? node.x : node.y));
+  const crossEnd = (component: LaidOutNode[]) => Math.max(...component.map((node) => vertical ? node.x + node.w : node.y + node.h));
+  components.sort((a, b) => crossStart(a) - crossStart(b));
+  let crossCursor: number | undefined;
+  for (const component of components) {
+    const shift = crossCursor === undefined ? 0 : crossCursor + theme.layout.nodeGap - crossStart(component);
+    for (const node of component) {
+      if (vertical) node.x += shift;
+      else node.y += shift;
+    }
+    crossCursor = crossEnd(component);
   }
 
   const laidOutEdges: LaidOutEdge[] = [];

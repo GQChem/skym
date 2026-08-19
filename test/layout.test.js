@@ -325,6 +325,30 @@ test("aligning disconnected roots moves and packs their whole trees", () => {
   }
 });
 
+test("disconnected trees have equal horizontal spacing", () => {
+  const nodes = [
+    node({ id: "a0" }), node({ id: "a1" }),
+    node({ id: "b0" }), node({ id: "b1" }), node({ id: "b2" }),
+    node({ id: "c0" }), node({ id: "c1" }),
+  ];
+  const edges = [
+    { id: "ea", from: "a0", to: "a1", dashed: false },
+    { id: "eb1", from: "b0", to: "b1", dashed: false },
+    { id: "eb2", from: "b0", to: "b2", dashed: false },
+    { id: "ec", from: "c0", to: "c1", dashed: false },
+  ];
+  const out = layoutGraph(graph(nodes, edges), DEFAULT_THEME, dagre, false);
+  const bounds = [["a0", "a1"], ["b0", "b1", "b2"], ["c0", "c1"]]
+    .map((ids) => out.nodes.filter((item) => ids.includes(item.id)))
+    .map((tree) => ({
+      left: Math.min(...tree.map((item) => item.x)),
+      right: Math.max(...tree.map((item) => item.x + item.w)),
+    }))
+    .sort((a, b) => a.left - b.left);
+  const gaps = bounds.slice(1).map((bound, i) => bound.left - bounds[i].right);
+  assert.deepEqual(gaps, [DEFAULT_THEME.layout.nodeGap, DEFAULT_THEME.layout.nodeGap]);
+});
+
 test("fan-out edges share one trunk before branching", () => {
   const nodes = [node({ id: "parent" }), ...["a", "b", "c", "d"].map((id) => node({ id }))];
   const edges = ["a", "b", "c", "d"].map((to, i) => ({ id: `e${i}`, from: "parent", to, dashed: false }));
