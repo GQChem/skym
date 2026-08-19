@@ -258,20 +258,10 @@ const renderCommands = async () => {
 const bindNodes = () => {
   for (const el of canvas.querySelectorAll(".skym-node")) {
     const id = el.dataset.id;
-    el.addEventListener("click", (ev) => {
-      ev.stopPropagation();
-      select(id);
-    });
     el.addEventListener("contextmenu", (ev) => {
       ev.preventDefault();
       ev.stopPropagation();
       openMenu(id, ev.clientX, ev.clientY);
-    });
-  }
-  for (const img of canvas.querySelectorAll(".skym-figure")) {
-    img.addEventListener("click", (ev) => {
-      ev.stopPropagation();
-      zoom(img.getAttribute("href"));
     });
   }
 };
@@ -324,8 +314,17 @@ const renderDetail = () => {
     parts.push(
       `<figure><img src="${escapeHtml(assetUrl(f.file))}" alt="${escapeHtml(f.caption || node.title)}" />` +
         (f.caption ? `<figcaption>${escapeHtml(f.caption)}</figcaption>` : "") +
+        `<div class="figure-actions"><a href="${escapeHtml(assetUrl(f.file))}" download="${escapeHtml(f.file)}">Download figure</a></div>` +
         `</figure>`,
     );
+  }
+  if (node.artifacts?.length) {
+    parts.push(`<div class="artifact-list"><h3>Files</h3>${node.artifacts.map((artifact) =>
+      `<a class="artifact" href="${escapeHtml(assetUrl(artifact.file))}" download="${escapeHtml(artifact.name)}">` +
+      `<span class="artifact-icon">&#8681;</span><span><b>${escapeHtml(artifact.name)}</b>` +
+      (artifact.label ? `<small>${escapeHtml(artifact.label)}</small>` : `<small>${formatBytes(artifact.bytes)} &middot; ${escapeHtml(artifact.mime)}</small>`) +
+      `</span></a>`
+    ).join("")}</div>`);
   }
   if (node.kind === "result" && !node.figures.length) {
     parts.push(`<p class="muted nudge">No figure attached — results read best with a plot or screenshot.</p>`);
@@ -606,14 +605,6 @@ $("design-remove").addEventListener("click", () => {
     $("design-status").textContent = "A chart must keep at least one node type.";
     return;
   }
-  if (node.artifacts?.length) {
-    parts.push(`<div class="artifact-list"><h3>Files</h3>${node.artifacts.map((artifact) =>
-      `<a class="artifact" href="${escapeHtml(assetUrl(artifact.file))}" download="${escapeHtml(artifact.name)}">` +
-      `<span class="artifact-icon">↧</span><span><b>${escapeHtml(artifact.name)}</b>` +
-      (artifact.label ? `<small>${escapeHtml(artifact.label)}</small>` : `<small>${formatBytes(artifact.bytes)} · ${escapeHtml(artifact.mime)}</small>`) +
-      `</span></a>`
-    ).join("")}</div>`);
-  }
   if (!confirm(`Remove the “${kind.label}” node type from ${designScope.value === "global" ? "all projects" : "this project"}? Existing nodes are not deleted.`)) return;
   const scope = designScope.value;
   const layer = readDesign(scope);
@@ -693,7 +684,12 @@ let drag = null;
 stage.addEventListener("pointerdown", (e) => {
   if (e.button !== 0) return;
   closeMenu();
-  drag = { x: e.clientX, y: e.clientY, vx: view.x, vy: view.y, moved: false };
+  const target = e.target instanceof Element ? e.target : null;
+  drag = {
+    x: e.clientX, y: e.clientY, vx: view.x, vy: view.y, moved: false,
+    nodeId: target?.closest(".skym-node")?.dataset.id,
+    figureSrc: target?.closest(".skym-figure")?.getAttribute("href"),
+  };
   stage.setPointerCapture(e.pointerId);
   stage.classList.add("dragging");
 });
@@ -709,9 +705,13 @@ stage.addEventListener("pointermove", (e) => {
   applyView();
 });
 
-const endDrag = () => {
+const endDrag = (e) => {
+  const finished = drag;
   drag = null;
   stage.classList.remove("dragging");
+  if (e.type !== "pointerup" || !finished || finished.moved) return;
+  if (finished.figureSrc) zoom(finished.figureSrc);
+  else if (finished.nodeId) select(finished.nodeId);
 };
 
 stage.addEventListener("pointerup", endDrag);

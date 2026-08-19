@@ -71,3 +71,10 @@ test("the node menu can queue an explanation", () => {
   assert.match(app, /label: "Explain"/);
   assert.match(app, /verb: "explain"/);
 });
+
+test("selection survives pointer capture and selected assets are downloadable", () => {
+  assert.match(app, /nodeId: target\?\.closest\("\.skym-node"\)/);
+  assert.match(app, /else if \(finished\.nodeId\) select\(finished\.nodeId\)/);
+  assert.match(app, /download="\$\{escapeHtml\(f\.file\)\}"/);
+  assert.match(app, /class="artifact"[\s\S]*download="\$\{escapeHtml\(artifact\.name\)\}"/);
+});

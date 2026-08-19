@@ -390,6 +390,10 @@ figcaption {
   margin-top: 5px;
 }
 
+.figure-actions { display: flex; justify-content: flex-end; margin-top: 6px; }
+.figure-actions a { color: var(--accent); font-size: 12px; font-weight: 650; text-decoration: none; }
+.figure-actions a:hover { text-decoration: underline; }
+
 .events {
   list-style: none;
   margin: 0;
